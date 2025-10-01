@@ -4,8 +4,7 @@
 
 #include "types.hpp"
 
-namespace emCore {
-namespace config {
+namespace emCore::config {
         
         // Task system configuration
         constexpr size_t max_tasks = EMCORE_MAX_TASKS;
@@ -47,5 +46,4 @@ namespace config {
             constexpr bool assert_enabled = false;
         #endif
         
-}  // namespace config
-}  // namespace emCore
+}  // namespace emCore::config

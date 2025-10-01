@@ -36,17 +36,45 @@ using string128 = etl::string<128>;
 template<typename T>
 using optional = etl::optional<T>;
 
-// Time types (milliseconds since boot)
+// Time types (microseconds for precision)
 using timestamp_t = u64;
 using duration_t = u32;
 
-// Priority levels
+/* Task ID type */
+using task_id_t = u16;
+constexpr task_id_t invalid_task_id = 0xFFFF;
+
+/* Topic ID strong type to avoid parameter confusion */
+struct topic_id_t {
+    u16 value;
+    
+    constexpr explicit topic_id_t(u16 val) noexcept : value(val) {}
+    constexpr explicit operator u16() const noexcept { return value; }
+    
+    constexpr bool operator==(topic_id_t other) const noexcept { return value == other.value; }
+    constexpr bool operator!=(topic_id_t other) const noexcept { return value != other.value; }
+};
+
+/* Task priority levels */
 enum class priority : u8 {
     idle = 0,
     low = 1,
     normal = 2,
     high = 3,
     critical = 4
+};
+
+/* Timeout strong type to avoid parameter confusion */
+struct timeout_ms_t {
+    u32 value;
+    
+    constexpr explicit timeout_ms_t(u32 val) noexcept : value(val) {}
+    constexpr explicit operator u32() const noexcept { return value; }
+    
+    constexpr bool operator==(timeout_ms_t other) const noexcept { return value == other.value; }
+    constexpr bool operator!=(timeout_ms_t other) const noexcept { return value != other.value; }
+    
+    static constexpr timeout_ms_t infinite() noexcept { return timeout_ms_t(0xFFFFFFFF); }
 };
 
 }  // namespace emCore

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/types.hpp"
+#include <cstdio>  // For snprintf
 
 // Platform detection and selection
 // Define one of these before including emCore, or let auto-detection work
@@ -41,39 +42,113 @@
     #endif
 #endif
 
-// Forward declare FreeRTOS functions (global namespace)
-#if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
-extern "C" unsigned long xTaskGetTickCount();
-extern "C" void vTaskDelay(const unsigned long xTicksToDelay);
-#endif
+// FreeRTOS functions are already declared by Arduino.h for ESP32
+// No need to forward declare them
 
-namespace emCore {
-namespace platform {
+namespace emCore::platform {
 
-// Platform-specific time function
-inline timestamp_t get_system_time() noexcept {
+// Platform-specific time function with microsecond precision (returns microseconds)
+inline timestamp_t get_system_time_us() noexcept {
     #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
-        // ESP32-Arduino: Use FreeRTOS xTaskGetTickCount for better accuracy
-        // Arduino ESP32 includes FreeRTOS
-        // Convert ticks to milliseconds (1000Hz = 1ms per tick with CONFIG_FREERTOS_HZ=1000)
-        return static_cast<timestamp_t>(::xTaskGetTickCount() * portTICK_PERIOD_MS);
+        // ESP32-Arduino: Use esp_timer directly (64-bit)
+        return static_cast<timestamp_t>(esp_timer_get_time());
         
     #elif defined(ARDUINO)
-        // Other Arduino platforms: Use millis()
-        return static_cast<timestamp_t>(millis());
+        // Other Arduino platforms: Use micros() 
+        return static_cast<timestamp_t>(micros());
         
     #elif defined(EMCORE_PLATFORM_ESP32)
-        // ESP-IDF native: Use esp_timer for microsecond precision
-        return static_cast<timestamp_t>(esp_timer_get_time() / 1000);
+        // ESP-IDF native: Use esp_timer directly (64-bit)
+        return static_cast<timestamp_t>(esp_timer_get_time());
         
     #elif defined(EMCORE_PLATFORM_STM32)
-        // STM32 CMSIS-RTOS: Use osKernelGetTickCount()
-        return static_cast<timestamp_t>(osKernelGetTickCount());
+        // STM32: Use DWT cycle counter for microsecond precision
+        static bool dwt_initialized = false;
+        if (!dwt_initialized) {
+            // Enable DWT cycle counter
+            CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+            DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+            DWT->CYCCNT = 0;
+            dwt_initialized = true;
+        }
+        
+        // Convert CPU cycles to microseconds
+        uint32_t cycles = DWT->CYCCNT;
+        return static_cast<timestamp_t>((uint64_t)cycles * 1000000ULL / SystemCoreClock);
         
     #else
-        // Generic/test implementation
-        static timestamp_t time_counter = 0;
-        return time_counter++;
+        // Generic platform: Use simple counter (placeholder)
+        static timestamp_t counter = 0;
+        return ++counter;
+    #endif
+}
+
+// Platform-specific time function (returns milliseconds for compatibility)
+inline timestamp_t get_system_time() noexcept {
+    return get_system_time_us() / 1000;
+}
+
+// Platform-specific logging function
+inline void log(const char* message) noexcept {
+    #if defined(ARDUINO)
+        // Arduino: Use Serial
+        Serial.println(message);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        // STM32: Use ITM (Instrumentation Trace Macrocell) for debug output
+        if ((ITM->TCR & ITM_TCR_ITMENA_Msk) && (ITM->TER & 1UL)) {
+            // ITM is enabled, send via ITM port 0
+            const char* ptr = message;
+            while (*ptr) {
+                ITM_SendChar(*ptr++);
+            }
+            ITM_SendChar('\n');
+        }
+    #else
+        // Generic: No logging (placeholder)
+        (void)message;
+    #endif
+}
+
+// Platform-specific formatted logging functions
+inline void logf(const char* format, u32 arg1) noexcept {
+    #if defined(ARDUINO)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1);
+        Serial.println(buffer);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1);
+        log(buffer);
+    #else
+        (void)format; (void)arg1;
+    #endif
+}
+
+inline void logf(const char* format, u32 arg1, u32 arg2) noexcept {
+    #if defined(ARDUINO)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2);
+        Serial.println(buffer);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2);
+        log(buffer);
+    #else
+        (void)format; (void)arg1; (void)arg2;
+    #endif
+}
+
+inline void logf(const char* format, u32 arg1, u32 arg2, u32 arg3) noexcept {
+    #if defined(ARDUINO)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2, arg3);
+        Serial.println(buffer);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2, arg3);
+        log(buffer);
+    #else
+        (void)format; (void)arg1; (void)arg2; (void)arg3;
     #endif
 }
 
@@ -117,9 +192,17 @@ inline void delay_us(u32 microseconds) noexcept {
         ets_delay_us(microseconds);
         
     #elif defined(EMCORE_PLATFORM_STM32)
-        // STM32: Cycle-accurate delay (approximate)
-        volatile u32 count = microseconds * (SystemCoreClock / 1000000U) / 5U;
-        while (count--) {
+        // STM32: Use DWT cycle counter for precise microsecond delay
+        if (microseconds == 0) return;
+        
+        // Ensure DWT is enabled (should be from get_system_time_us)
+        CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+        DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+        
+        uint32_t start_cycles = DWT->CYCCNT;
+        uint32_t target_cycles = (microseconds * SystemCoreClock) / 1000000U;
+        
+        while ((DWT->CYCCNT - start_cycles) < target_cycles) {
             __asm volatile("nop");
         }
         
@@ -142,11 +225,366 @@ constexpr platform_info get_platform_info() noexcept {
     #elif defined(EMCORE_PLATFORM_ARDUINO)
         return {"Arduino", 16000000, false};
     #elif defined(EMCORE_PLATFORM_STM32)
-        return {"STM32", 168000000, true};  // CMSIS-RTOS enabled
+        return {"STM32", SystemCoreClock, true};  // Use actual system clock, CMSIS-RTOS enabled
     #else
         return {"Generic", 1000000, false};
     #endif
 }
 
-}  // namespace platform
-}  // namespace emCore
+/* Native task creation (FreeRTOS/RTOS wrapper) */
+using task_handle_t = void*;
+using task_function_t = void (*)(void*);
+
+struct task_create_params {
+    task_function_t function;
+    const char* name;
+    u32 stack_size;
+    void* parameters;
+    u32 priority;
+    task_handle_t* handle;
+    bool start_suspended;  // Create in suspended state
+};
+
+inline bool create_native_task(const task_create_params& params) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        /* ESP32-Arduino: Create FreeRTOS task */
+        BaseType_t result;
+        if (params.start_suspended) {
+            result = xTaskCreate(
+                params.function,
+                params.name,
+                params.stack_size,
+                params.parameters,
+                params.priority | portPRIVILEGE_BIT,  // Suspended
+                reinterpret_cast<TaskHandle_t*>(params.handle)
+            );
+            if (result == pdPASS && *params.handle != nullptr) {
+                vTaskSuspend(static_cast<TaskHandle_t>(*params.handle));
+            }
+        } else {
+            result = xTaskCreate(
+                params.function,
+                params.name,
+                params.stack_size,
+                params.parameters,
+                params.priority,
+                reinterpret_cast<TaskHandle_t*>(params.handle)
+            );
+        }
+        return (result == pdPASS);
+        
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        /* ESP-IDF native: Create FreeRTOS task */
+        BaseType_t result = xTaskCreate(
+            params.function,
+            params.name,
+            params.stack_size,
+            params.parameters,
+            params.priority,
+            reinterpret_cast<TaskHandle_t*>(params.handle)
+        );
+        return (result == pdPASS);
+        
+    #elif defined(EMCORE_PLATFORM_STM32)
+        /* STM32 CMSIS-RTOS: Create thread */
+        osThreadDef_t thread_def;
+        thread_def.name = const_cast<char*>(params.name);
+        thread_def.pthread = reinterpret_cast<os_pthread>(params.function);
+        thread_def.tpriority = static_cast<osPriority>(params.priority);
+        thread_def.instances = 0;
+        thread_def.stacksize = params.stack_size;
+        
+        osThreadId id = osThreadCreate(&thread_def, params.parameters);
+        if (params.handle != nullptr) {
+            *params.handle = id;
+        }
+        return (id != nullptr);
+        
+    #else
+        /* Generic platform: No native task support */
+        (void)params;
+        return false;
+    #endif
+}
+
+inline bool delete_native_task(task_handle_t handle) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        vTaskDelete(reinterpret_cast<TaskHandle_t>(handle));
+        return true;
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        vTaskDelete(reinterpret_cast<TaskHandle_t>(handle));
+        return true;
+    #elif defined(EMCORE_PLATFORM_STM32)
+        osThreadTerminate(reinterpret_cast<osThreadId>(handle));
+        return true;
+    #else
+        (void)handle;
+        return false;
+    #endif
+}
+
+inline bool suspend_native_task(task_handle_t handle) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        vTaskSuspend(reinterpret_cast<TaskHandle_t>(handle));
+        return true;
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        vTaskSuspend(reinterpret_cast<TaskHandle_t>(handle));
+        return true;
+    #elif defined(EMCORE_PLATFORM_STM32)
+        osThreadSuspend(reinterpret_cast<osThreadId>(handle));
+        return true;
+    #else
+        (void)handle;
+        return false;
+    #endif
+}
+
+inline bool resume_native_task(task_handle_t handle) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        vTaskResume(reinterpret_cast<TaskHandle_t>(handle));
+        return true;
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        vTaskResume(reinterpret_cast<TaskHandle_t>(handle));
+        return true;
+    #elif defined(EMCORE_PLATFORM_STM32)
+        osThreadResume(reinterpret_cast<osThreadId>(handle));
+        return true;
+    #else
+        (void)handle;
+        return false;
+    #endif
+}
+
+/* Task notification for event-driven messaging */
+inline bool notify_task(task_handle_t handle, u32 value = 0x01) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        if (handle == nullptr) return false;
+        xTaskNotify(
+            reinterpret_cast<TaskHandle_t>(handle),
+            value,
+            eSetBits
+        );
+        return true;
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        if (handle == nullptr) return false;
+        xTaskNotify(
+            reinterpret_cast<TaskHandle_t>(handle),
+            value,
+            eSetBits
+        );
+        return true;
+    #elif defined(EMCORE_PLATFORM_STM32)
+        if (handle == nullptr) return false;
+        osSignalSet(reinterpret_cast<osThreadId>(handle), value);
+        return true;
+    #else
+        (void)handle;
+        (void)value;
+        return false;
+    #endif
+}
+
+inline bool wait_notification(u32 timeout_ms, u32* out_value) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        u32 notification_value = 0;
+        BaseType_t result = xTaskNotifyWait(
+            0x00,      /* Don't clear bits on entry */
+            0xFFFFFFFF,/* Clear all bits on exit */
+            &notification_value,
+            pdMS_TO_TICKS(timeout_ms)
+        );
+        if (out_value != nullptr) {
+            *out_value = notification_value;
+        }
+        return (result == pdTRUE);
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        u32 notification_value = 0;
+        BaseType_t result = xTaskNotifyWait(
+            0x00,
+            0xFFFFFFFF,
+            &notification_value,
+            pdMS_TO_TICKS(timeout_ms)
+        );
+        if (out_value != nullptr) {
+            *out_value = notification_value;
+        }
+        return (result == pdTRUE);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        osEvent event = osSignalWait(0x01, timeout_ms);
+        if (out_value != nullptr) {
+            *out_value = (event.status == osEventSignal) ? event.value.signals : 0;
+        }
+        return (event.status == osEventSignal);
+    #else
+        /* Generic: busy wait with polling */
+        (void)timeout_ms;
+        (void)out_value;
+        return false;
+    #endif
+}
+
+inline void clear_notification() noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        xTaskNotifyStateClear(nullptr);  /* Clear current task */
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        xTaskNotifyStateClear(nullptr);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        /* STM32 doesn't need clearing in this model */
+    #else
+        /* Generic: no-op */
+    #endif
+}
+
+inline task_handle_t get_current_task_handle() noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        return xTaskGetCurrentTaskHandle();
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        return xTaskGetCurrentTaskHandle();
+    #elif defined(EMCORE_PLATFORM_STM32)
+        return reinterpret_cast<task_handle_t>(osThreadGetId());
+    #else
+        return nullptr;
+    #endif
+}
+
+inline void resume_task(task_handle_t handle) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        if (handle != nullptr) {
+            vTaskResume(static_cast<TaskHandle_t>(handle));
+        }
+    #elif defined(EMCORE_PLATFORM_ESP32)
+        if (handle != nullptr) {
+            vTaskResume(static_cast<TaskHandle_t>(handle));
+        }
+    #elif defined(EMCORE_PLATFORM_STM32)
+        if (handle != nullptr) {
+            osThreadResume(reinterpret_cast<osThreadId>(handle));
+        }
+    #else
+        (void)handle;
+    #endif
+}
+
+// Platform-specific system reset function
+inline void system_reset() noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        esp_restart();
+    #elif defined(EMCORE_PLATFORM_STM32)
+        NVIC_SystemReset();
+    #else
+        // Generic fallback - hang and trigger hardware watchdog
+        while(true) { 
+            // Infinite loop to trigger hardware watchdog reset
+        }
+    #endif
+}
+
+// Platform-specific task yield function
+inline void task_yield() noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        taskYIELD(); // FreeRTOS yield
+    #elif defined(EMCORE_PLATFORM_STM32)
+        osThreadYield(); // CMSIS-RTOS yield
+    #else
+        // Generic fallback - no yield available
+    #endif
+}
+
+// Platform-specific stack monitoring
+inline size_t get_stack_high_water_mark() noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        UBaseType_t stack_high_water = uxTaskGetStackHighWaterMark(nullptr);
+        return stack_high_water * sizeof(StackType_t);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        // STM32 CMSIS-RTOS stack monitoring (if available)
+        return 0; // Not implemented
+    #else
+        return 0; // Not available
+    #endif
+}
+
+// Platform-specific critical section management
+struct critical_section {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        mutable portMUX_TYPE spinlock = portMUX_INITIALIZER_UNLOCKED;
+    #endif
+    
+    void enter() const noexcept {
+        #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+            portENTER_CRITICAL(&spinlock);
+        #elif defined(EMCORE_PLATFORM_STM32)
+            __disable_irq();
+        #endif
+    }
+    
+    void exit() const noexcept {
+        #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+            portEXIT_CRITICAL(&spinlock);
+        #elif defined(EMCORE_PLATFORM_STM32)
+            __enable_irq();
+        #endif
+    }
+};
+
+// Platform-specific semaphore handle
+using semaphore_handle_t = void*;
+
+// Platform-specific semaphore operations
+inline semaphore_handle_t create_binary_semaphore() noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        return xSemaphoreCreateBinary();
+    #elif defined(EMCORE_PLATFORM_STM32)
+        // STM32 CMSIS-RTOS semaphore creation
+        return nullptr; // Not implemented
+    #else
+        return nullptr; // Not available
+    #endif
+}
+
+inline void delete_semaphore(semaphore_handle_t handle) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        if (handle != nullptr) {
+            vSemaphoreDelete(static_cast<SemaphoreHandle_t>(handle));
+        }
+    #elif defined(EMCORE_PLATFORM_STM32)
+        // STM32 CMSIS-RTOS semaphore deletion
+        (void)handle;
+    #else
+        (void)handle;
+    #endif
+}
+
+inline bool semaphore_give(semaphore_handle_t handle) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        if (handle != nullptr) {
+            return xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(handle), nullptr) == pdTRUE;
+        }
+        return false;
+    #elif defined(EMCORE_PLATFORM_STM32)
+        (void)handle;
+        return false; // Not implemented
+    #else
+        (void)handle;
+        return false; // Not available
+    #endif
+}
+
+inline bool semaphore_take(semaphore_handle_t handle, duration_t timeout_us) noexcept {
+    #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
+        if (handle != nullptr) {
+            TickType_t ticks = pdMS_TO_TICKS(timeout_us / 1000);
+            return xSemaphoreTake(static_cast<SemaphoreHandle_t>(handle), ticks) == pdTRUE;
+        }
+        return false;
+    #elif defined(EMCORE_PLATFORM_STM32)
+        (void)handle;
+        (void)timeout_us;
+        return false; // Not implemented
+    #else
+        (void)handle;
+        (void)timeout_us;
+        return false; // Not available
+    #endif
+}
+
+}  // namespace emCore::platform

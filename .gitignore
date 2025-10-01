@@ -36,3 +36,6 @@ lib/
 
 # External dependencies (managed by PlatformIO)
 external/etl/
+
+# Test directory (separate git repository)
+test/
