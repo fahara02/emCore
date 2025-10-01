@@ -1,0 +1,38 @@
+# Build directories
+build/
+.pio/
+.vscode/.browse.c_cpp.db*
+.vscode/launch.json
+
+# IDE
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.out
+*.app
+*.elf
+*.hex
+*.bin
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# PlatformIO
+.pioenvs/
+.piolibdeps/
+lib/
+.clang_complete
+.gcc-flags.json
+
+# External dependencies (managed by PlatformIO)
+external/etl/

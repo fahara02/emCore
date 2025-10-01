@@ -1,0 +1,79 @@
+CompileFlags:
+  Add:
+    - -std=gnu++17
+    - -fno-rtti
+    - -fno-exceptions
+    - -Wall
+    - -Wextra
+    - -Wpedantic
+    - -Isrc
+    - -Iexternal/etl/include
+    - -Iexternal/etl/src
+    - -DETL_NO_STL
+    - -DETL_NO_CHECKS
+    - -DETL_NO_INITIALIZER_LIST
+    - -DETL_TARGET_DEVICE_GENERIC
+    - -DETL_CPP17_SUPPORTED
+    - -DEMCORE_MAX_TASKS=16
+    - -DEMCORE_MAX_EVENTS=32
+    - -D__GNUC__=11
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  # Suppress:
+  #   - initializer_list
+  ClangTidy:
+    Add:
+      # Google style checks
+      - google-*
+      # Readability
+      - readability-*
+      # Modernize C++
+      - modernize-*
+      # Performance
+      - performance-*
+      # Bug-prone patterns
+      - bugprone-*
+      # Concurrency issues
+      - concurrency-*
+      # C++ Core Guidelines
+      - cppcoreguidelines-*
+      # Misc checks
+      - misc-*
+      # Portability
+      - portability-*
+    Remove:
+      # Disable checks incompatible with embedded/no-RTTI
+      - modernize-use-trailing-return-type
+      - cppcoreguidelines-avoid-magic-numbers
+      - readability-magic-numbers
+      - cppcoreguidelines-pro-type-reinterpret-cast
+      - cppcoreguidelines-pro-bounds-pointer-arithmetic
+      - cppcoreguidelines-avoid-c-arrays
+      - modernize-avoid-c-arrays
+      - misc-non-private-member-variables-in-classes
+      - readability-identifier-naming
+    CheckOptions:
+      readability-identifier-naming.NamespaceCase: CamelCase
+      readability-identifier-naming.NamespaceIgnoredRegexp: 'emCore|std|etl'
+      readability-identifier-naming.ClassCase: lower_case
+      readability-identifier-naming.StructCase: lower_case
+      readability-identifier-naming.FunctionCase: lower_case
+      readability-identifier-naming.VariableCase: lower_case
+      readability-identifier-naming.ParameterCase: lower_case
+      readability-identifier-naming.MemberCase: lower_case
+      readability-identifier-naming.PrivateMemberSuffix: '_'
+      readability-identifier-naming.ProtectedMemberSuffix: '_'
+      readability-identifier-naming.EnumCase: lower_case
+      readability-identifier-naming.EnumConstantCase: lower_case
+      readability-identifier-naming.ConstexprVariableCase: lower_case
+      readability-identifier-naming.GlobalConstantCase: lower_case
+      readability-identifier-naming.TypeAliasCase: lower_case
+      readability-identifier-naming.TypedefCase: lower_case
+      readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+      readability-function-cognitive-complexity.Threshold: 50
+      readability-function-size.LineThreshold: 200
+      google-readability-function-size.StatementThreshold: 800
+      google-readability-namespace-comments.ShortNamespaceLines: 10
+      google-readability-namespace-comments.SpacesBeforeComments: 2

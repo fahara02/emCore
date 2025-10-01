@@ -1,0 +1,30 @@
+{
+    "configurations": [
+        {
+            "name": "emCore",
+            "includePath": [
+                "${workspaceFolder}/src",
+                "${workspaceFolder}/external/etl/include",
+                "${workspaceFolder}/external/etl/src"
+            ],
+            "defines": [
+                "ETL_NO_STL",
+                "ETL_TARGET_DEVICE_GENERIC",
+                "EMCORE_MAX_TASKS=16",
+                "EMCORE_MAX_EVENTS=32"
+            ],
+            "compilerPath": "",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "clang-x64",
+            "compilerArgs": [
+                "-fno-rtti",
+                "-fno-exceptions",
+                "-Wall",
+                "-Wextra",
+                "-Wpedantic"
+            ]
+        }
+    ],
+    "version": 4
+}

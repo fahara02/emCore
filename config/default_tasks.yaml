@@ -1,0 +1,31 @@
+# Default Task Configuration for emCore
+# This file defines the default tasks that will be created if no user tasks.yaml is provided
+#
+# To use custom tasks, create a tasks.yaml file and define EMCORE_USER_TASKS_YAML
+# before including emCore
+
+tasks:
+  - name: "idle_task"
+    function: "task_idle"
+    priority: "idle"
+    period_ms: 0
+    enabled: true
+    description: "Idle task - runs when no other tasks are ready"
+    
+  - name: "heartbeat"
+    function: "task_heartbeat"
+    priority: "low"
+    period_ms: 1000
+    enabled: true
+    description: "Heartbeat task - blinks LED or sends alive signal"
+    
+  - name: "system_monitor"
+    function: "task_system_monitor"
+    priority: "normal"
+    period_ms: 5000
+    enabled: false
+    description: "System monitoring - CPU usage, memory, etc."
+
+# Priority levels: idle, low, normal, high, critical
+# period_ms: 0 means run once, >0 means periodic task
+# enabled: true/false to enable/disable task at startup

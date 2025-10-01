@@ -1,0 +1,35 @@
+{
+    "C_Cpp.default.configurationProvider": "clangd",
+    "clangd.arguments": [
+        "--compile-commands-dir=${workspaceFolder}",
+        "--header-insertion=never",
+        "--completion-style=detailed",
+        "--function-arg-placeholders=false"
+    ],
+    "clangd.fallbackFlags": [
+        "-std=gnu++17",
+        "-fno-rtti",
+        "-fno-exceptions",
+        "-Wall",
+        "-Wextra",
+        "-Wpedantic",
+        "-I${workspaceFolder}/src",
+        "-I${workspaceFolder}/external/etl/include",
+        "-I${workspaceFolder}/external/etl/src",
+        "-DETL_NO_STL",
+        "-DETL_TARGET_DEVICE_GENERIC",
+        "-DEMCORE_MAX_TASKS=16",
+        "-DEMCORE_MAX_EVENTS=32"
+    ],
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "files.associations": {
+        "*.hpp": "cpp",
+        "*.h": "cpp"
+    },
+    "git.ignoredRepositories": [
+        "${workspaceFolder}/external/etl"
+    ],
+    "files.exclude": {
+        "**/external/etl": true
+    }
+}

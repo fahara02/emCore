@@ -1,0 +1,140 @@
+---
+# Clang-Tidy configuration for emCore - Google C++ Style Guide
+Checks: >
+  google-*,
+  readability-*,
+  modernize-*,
+  performance-*,
+  bugprone-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  portability-*,
+  -modernize-use-trailing-return-type,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-avoid-c-arrays,
+  -modernize-avoid-c-arrays,
+  -misc-non-private-member-variables-in-classes,
+  -cppcoreguidelines-pro-type-union-access,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -readability-function-cognitive-complexity,
+  -bugprone-easily-swappable-parameters,
+  -readability-identifier-naming
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*'
+AnalyzeTemporaryDtors: false
+FormatStyle: google
+
+CheckOptions:
+  # Naming conventions (Google style: snake_case, except emCore namespace)
+  - key: readability-identifier-naming.NamespaceCase
+    value: CamelCase
+  - key: readability-identifier-naming.NamespaceIgnoredRegexp
+    value: 'emCore|std|etl'
+  - key: readability-identifier-naming.ClassCase
+    value: lower_case
+  - key: readability-identifier-naming.StructCase
+    value: lower_case
+  - key: readability-identifier-naming.UnionCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumCase
+    value: lower_case
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.ProtectedMemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.EnumConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.StaticConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.TypeAliasCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  
+  # Function complexity thresholds
+  - key: readability-function-size.LineThreshold
+    value: 200
+  - key: readability-function-size.StatementThreshold
+    value: 800
+  - key: readability-function-size.BranchThreshold
+    value: 50
+  - key: readability-function-size.ParameterThreshold
+    value: 10
+  - key: readability-function-size.NestingThreshold
+    value: 6
+  
+  # Google-specific options
+  - key: google-readability-braces-around-statements.ShortStatementLines
+    value: 1
+  - key: google-readability-function-size.StatementThreshold
+    value: 800
+  - key: google-readability-namespace-comments.ShortNamespaceLines
+    value: 10
+  - key: google-readability-namespace-comments.SpacesBeforeComments
+    value: 2
+  
+  # Readability options
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: 0
+  - key: readability-implicit-bool-conversion.AllowPointerConditions
+    value: true
+  - key: readability-simplify-boolean-expr.ChainedConditionalReturn
+    value: true
+  - key: readability-simplify-boolean-expr.ChainedConditionalAssignment
+    value: true
+  - key: readability-uppercase-literal-suffix.NewSuffixes
+    value: 'L;LL;LU;LLU'
+  
+  # Modernize options
+  - key: modernize-use-nullptr.NullMacros
+    value: 'NULL'
+  - key: modernize-use-override.IgnoreDestructors
+    value: true
+  - key: modernize-loop-convert.MinConfidence
+    value: reasonable
+  
+  # Performance options
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: true
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: ''
+  
+  # Bugprone options
+  - key: bugprone-assert-side-effect.AssertMacros
+    value: 'assert,EMCORE_ASSERT'
+  - key: bugprone-string-constructor.WarnOnLargeLength
+    value: true
+  - key: bugprone-string-constructor.LargeLengthThreshold
+    value: 0x800000
+  
+  # Misc options
+  - key: misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
+    value: true
+  
+  # Core Guidelines options
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: true
+  - key: cppcoreguidelines-special-member-functions.AllowMissingMoveFunctions
+    value: true
+...
