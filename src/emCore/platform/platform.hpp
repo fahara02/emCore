@@ -152,6 +152,34 @@ inline void logf(const char* format, u32 arg1, u32 arg2, u32 arg3) noexcept {
     #endif
 }
 
+inline void logf(const char* format, u32 arg1, u32 arg2, u32 arg3, u32 arg4) noexcept {
+    #if defined(ARDUINO)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2, arg3, arg4);
+        Serial.println(buffer);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2, arg3, arg4);
+        log(buffer);
+    #else
+        (void)format; (void)arg1; (void)arg2; (void)arg3; (void)arg4;
+    #endif
+}
+
+inline void logf(const char* format, u32 arg1, u32 arg2, u32 arg3, u32 arg4, u32 arg5) noexcept {
+    #if defined(ARDUINO)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2, arg3, arg4, arg5);
+        Serial.println(buffer);
+    #elif defined(EMCORE_PLATFORM_STM32)
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), format, arg1, arg2, arg3, arg4, arg5);
+        log(buffer);
+    #else
+        (void)format; (void)arg1; (void)arg2; (void)arg3; (void)arg4; (void)arg5;
+    #endif
+}
+
 // Platform-specific delay function
 inline void delay_ms(duration_t milliseconds) noexcept {
     #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
@@ -236,31 +264,31 @@ using task_handle_t = void*;
 using task_function_t = void (*)(void*);
 
 struct task_create_params {
-    task_function_t function;
-    const char* name;
-    u32 stack_size;
-    void* parameters;
-    u32 priority;
-    task_handle_t* handle;
-    bool start_suspended;  // Create in suspended state
+    task_function_t function{nullptr};
+    const char* name{nullptr};
+    u32 stack_size{0};
+    void* parameters{nullptr};
+    u32 priority{0};
+    task_handle_t* handle{nullptr};
+    bool start_suspended{false};  // Create then suspend immediately if true
+    bool pin_to_core{false};
+    int core_id{-1};
 };
 
 inline bool create_native_task(const task_create_params& params) noexcept {
     #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
         /* ESP32-Arduino: Create FreeRTOS task */
         BaseType_t result;
-        if (params.start_suspended) {
-            result = xTaskCreate(
+        if (params.pin_to_core && params.core_id >= 0) {
+            result = xTaskCreatePinnedToCore(
                 params.function,
                 params.name,
                 params.stack_size,
                 params.parameters,
-                params.priority | portPRIVILEGE_BIT,  // Suspended
-                reinterpret_cast<TaskHandle_t*>(params.handle)
+                params.priority,
+                reinterpret_cast<TaskHandle_t*>(params.handle),
+                static_cast<BaseType_t>(params.core_id)
             );
-            if (result == pdPASS && *params.handle != nullptr) {
-                vTaskSuspend(static_cast<TaskHandle_t>(*params.handle));
-            }
         } else {
             result = xTaskCreate(
                 params.function,
@@ -271,18 +299,37 @@ inline bool create_native_task(const task_create_params& params) noexcept {
                 reinterpret_cast<TaskHandle_t*>(params.handle)
             );
         }
+        if (result == pdPASS && params.start_suspended && params.handle && *params.handle) {
+            vTaskSuspend(static_cast<TaskHandle_t>(*params.handle));
+        }
         return (result == pdPASS);
         
     #elif defined(EMCORE_PLATFORM_ESP32)
         /* ESP-IDF native: Create FreeRTOS task */
-        BaseType_t result = xTaskCreate(
-            params.function,
-            params.name,
-            params.stack_size,
-            params.parameters,
-            params.priority,
-            reinterpret_cast<TaskHandle_t*>(params.handle)
-        );
+        BaseType_t result;
+        if (params.pin_to_core && params.core_id >= 0) {
+            result = xTaskCreatePinnedToCore(
+                params.function,
+                params.name,
+                params.stack_size,
+                params.parameters,
+                params.priority,
+                reinterpret_cast<TaskHandle_t*>(params.handle),
+                static_cast<BaseType_t>(params.core_id)
+            );
+        } else {
+            result = xTaskCreate(
+                params.function,
+                params.name,
+                params.stack_size,
+                params.parameters,
+                params.priority,
+                reinterpret_cast<TaskHandle_t*>(params.handle)
+            );
+        }
+        if (result == pdPASS && params.start_suspended && params.handle && *params.handle) {
+            vTaskSuspend(static_cast<TaskHandle_t>(*params.handle));
+        }
         return (result == pdPASS);
         
     #elif defined(EMCORE_PLATFORM_STM32)
@@ -384,6 +431,7 @@ inline bool notify_task(task_handle_t handle, u32 value = 0x01) noexcept {
     #endif
 }
 
+// NOLINTNEXTLINE(misc-const-correctness) - out_value is an output parameter
 inline bool wait_notification(u32 timeout_ms, u32* out_value) noexcept {
     #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
         u32 notification_value = 0;

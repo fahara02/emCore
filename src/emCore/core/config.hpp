@@ -4,6 +4,14 @@
 
 #include "types.hpp"
 
+// If available, include generated messaging configuration macros produced from YAML.
+// This allows YAML to override the default capacities at compile time.
+#if defined(__has_include)
+#  if __has_include(<emCore/generated/messaging_config.hpp>)
+#    include <emCore/generated/messaging_config.hpp>
+#  endif
+#endif
+
 namespace emCore::config {
         
         // Task system configuration
@@ -11,10 +19,31 @@ namespace emCore::config {
         constexpr size_t max_task_name_length = 32;
         constexpr duration_t default_task_timeout = 1000; // ms
         
-        // Event system configuration
         constexpr size_t max_events = EMCORE_MAX_EVENTS;
         constexpr size_t max_event_handlers = 16;
         constexpr size_t event_queue_size = 64;
+        
+        // Messaging system configuration - defaults when not specified in YAML
+        // These provide minimum safe values. Generators (YAML) can override at build time
+        // by defining EMCORE_MSG_QUEUE_CAPACITY, EMCORE_MSG_MAX_TOPICS, and
+        // EMCORE_MSG_MAX_SUBS_PER_TOPIC via compile definitions.
+        #ifdef EMCORE_MSG_QUEUE_CAPACITY
+        constexpr size_t default_mailbox_queue_capacity = EMCORE_MSG_QUEUE_CAPACITY;
+        #else
+        constexpr size_t default_mailbox_queue_capacity = 16;
+        #endif
+
+        #ifdef EMCORE_MSG_MAX_TOPICS
+        constexpr size_t default_max_topics = EMCORE_MSG_MAX_TOPICS;
+        #else
+        constexpr size_t default_max_topics = 32;
+        #endif
+
+        #ifdef EMCORE_MSG_MAX_SUBS_PER_TOPIC
+        constexpr size_t default_max_subscribers_per_topic = EMCORE_MSG_MAX_SUBS_PER_TOPIC;
+        #else
+        constexpr size_t default_max_subscribers_per_topic = 8;
+        #endif
         
         // Memory pool configuration
         constexpr size_t small_block_size = 32;
@@ -25,7 +54,6 @@ namespace emCore::config {
         constexpr size_t medium_pool_count = 8;
         constexpr size_t large_pool_count = 4;
         
-        // Platform specific configurations
         #ifdef EMCORE_PLATFORM_ESP32
             constexpr u32 system_clock_hz = 240000000; // 240MHz
             constexpr size_t stack_size_default = 4096;

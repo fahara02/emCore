@@ -36,7 +36,7 @@ using recovery_fn = void(*)(task_id_t task_id) noexcept;
  */
 struct watchdog_entry {
     task_id_t task_id{invalid_task_id};
-    timestamp_t last_feed_time{0};
+    volatile timestamp_t last_feed_time{0};  // Volatile to prevent compiler optimization races
     duration_t timeout_ms{5000};
     watchdog_action action{watchdog_action::log_warning};
     recovery_fn recovery_callback{nullptr};
@@ -146,7 +146,9 @@ public:
     void feed(task_id_t task_id) noexcept {
         auto* entry = find_entry(task_id);
         if (entry != nullptr) {
-            entry->last_feed_time = platform::get_system_time_us();
+            // Use volatile write to prevent compiler reordering
+            timestamp_t now = platform::get_system_time_us();
+            entry->last_feed_time = now;
         }
     }
     
@@ -217,7 +219,9 @@ public:
                 continue;
             }
             
-            timestamp_t elapsed_us = now - entry.last_feed_time;
+            // Volatile read to get consistent timestamp
+            timestamp_t last_feed = entry.last_feed_time;
+            timestamp_t elapsed_us = now - last_feed;
             duration_t elapsed_ms = static_cast<duration_t>(elapsed_us / 1000);
             
             if (elapsed_ms >= entry.timeout_ms) {

@@ -24,29 +24,78 @@ namespace emCore::messaging {
 template<typename MessageType = medium_message, size_t MaxTasks = config::max_tasks>
 class message_broker {
 private:
-    static constexpr size_t queue_capacity = 16;
-    static constexpr size_t max_topics = 32;
-    static constexpr size_t max_subscribers_per_topic = 8;
+    static constexpr size_t queue_capacity = config::default_mailbox_queue_capacity;
+    static constexpr size_t max_topics = config::default_max_topics;
+    static constexpr size_t max_subscribers_per_topic = config::default_max_subscribers_per_topic;
     
-    /* Task mailbox with MPSC queue */
+    /* Task mailbox with MPSC dual-queue (high/normal) for priority-aware delivery */
     struct task_mailbox {
         u16 task_id{0xFFFF};
-        etl::circular_buffer<MessageType, queue_capacity> queue;
+        // Split capacity: reserve 1/4 for high priority (at least 1), rest for normal
+        static constexpr size_t high_capacity = (queue_capacity < 4) ? 1 : (queue_capacity / 4);
+        static constexpr size_t normal_capacity = (queue_capacity > high_capacity) ? (queue_capacity - high_capacity) : 0;
+        etl::circular_buffer<MessageType, high_capacity> high_queue;
+        etl::circular_buffer<MessageType, normal_capacity> normal_queue;
         platform::task_handle_t handle{nullptr};
         mutable platform::critical_section critical_section;
+        // Soft limit for total depth across both queues (<= queue_capacity)
+        u16 depth_limit{static_cast<u16>(queue_capacity)};
+        // Per-mailbox statistics
+        u32 dropped_overflow{0};
+        u32 received_count{0};
+        // Overflow behavior: if true, drop oldest (prefer normal) to make room; otherwise reject new message
+        bool overflow_drop_oldest{true};
         
         task_mailbox() = default;
         
-        /* Thread-safe send */
+        size_t total_size() const noexcept { return high_queue.size() + normal_queue.size(); }
+        bool is_empty_unlocked() const noexcept { return high_queue.empty() && normal_queue.empty(); }
+        
+        /* Thread-safe send with total soft depth limit and overflow policy */
         result<void, error_code> send(const MessageType& msg) noexcept {
+            const bool is_urgent = (static_cast<message_flags>(msg.header.flags) & message_flags::urgent) == message_flags::urgent
+                                   || (msg.header.priority >= static_cast<u8>(message_priority::high));
             critical_section.enter();
             
-            if (queue.full()) {
-                critical_section.exit();
-                return result<void, error_code>(error_code::out_of_memory);
+            const bool depth_reached = (total_size() >= depth_limit);
+            bool target_full = is_urgent ? high_queue.full() : normal_queue.full();
+            if (target_full || depth_reached) {
+                // Respect persistent flag: reject new instead of dropping oldest
+                const bool is_persistent = (static_cast<message_flags>(msg.header.flags) & message_flags::persistent) == message_flags::persistent;
+                if (!is_persistent && overflow_drop_oldest && !is_empty_unlocked()) {
+                    // Prefer dropping from normal queue; if empty, drop from high
+                    if (!normal_queue.empty()) {
+                        normal_queue.pop();
+                    } else if (!high_queue.empty()) {
+                        high_queue.pop();
+                    }
+                    dropped_overflow++;
+                    // fallthrough to push
+                } else {
+                    critical_section.exit();
+                    return result<void, error_code>(error_code::out_of_memory);
+                }
             }
             
-            queue.push(msg);
+            if (is_urgent) {
+                if (!high_queue.full()) {
+                    high_queue.push(msg);
+                } else if (!normal_queue.full()) {
+                    normal_queue.push(msg);
+                } else {
+                    critical_section.exit();
+                    return result<void, error_code>(error_code::out_of_memory);
+                }
+            } else {
+                if (!normal_queue.full()) {
+                    normal_queue.push(msg);
+                } else if (!high_queue.full()) {
+                    high_queue.push(msg);
+                } else {
+                    critical_section.exit();
+                    return result<void, error_code>(error_code::out_of_memory);
+                }
+            }
             critical_section.exit();
             
             /* Notify task */
@@ -57,22 +106,29 @@ private:
             return ok();
         }
         
-        /* Thread-safe receive */
+        /* Thread-safe receive (drain high priority first) */
         result<MessageType, error_code> receive() noexcept {
             critical_section.enter();
             
-            if (queue.empty()) {
+            if (high_queue.empty() && normal_queue.empty()) {
                 critical_section.exit();
                 return result<MessageType, error_code>(error_code::not_found);
             }
             
-            MessageType msg = queue.front();
-            queue.pop();
+            MessageType msg;
+            if (!high_queue.empty()) {
+                msg = high_queue.front();
+                high_queue.pop();
+            } else {
+                msg = normal_queue.front();
+                normal_queue.pop();
+            }
+            received_count++;
             
-            bool is_empty = queue.empty();
+            bool now_empty = high_queue.empty() && normal_queue.empty();
             critical_section.exit();
             
-            if (is_empty) {
+            if (now_empty) {
                 platform::clear_notification();
             }
             
@@ -80,13 +136,15 @@ private:
         }
         
         bool empty() const noexcept {
-            return queue.empty();
+            return high_queue.empty() && normal_queue.empty();
         }
     };
     
     /* Topic subscription */
     struct topic_subscription {
         u16 topic_id{0xFFFF};
+        // Soft capacity limit for subscribers (<= max_subscribers_per_topic)
+        u16 capacity_limit{static_cast<u16>(max_subscribers_per_topic)};
         etl::vector<u16, max_subscribers_per_topic> subscriber_ids;
         
         topic_subscription() = default;
@@ -131,22 +189,50 @@ private:
 public:
     message_broker() noexcept = default;
     
+    /* Configure per-mailbox depth limit (soft cap <= queue_capacity) */
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    result<void, error_code> set_mailbox_depth(u16 task_id, size_t depth) noexcept {
+        task_mailbox* mailbox = find_mailbox(task_id);
+        if (mailbox == nullptr) {
+            return result<void, error_code>(error_code::not_found);
+        }
+        const size_t clamped = (depth > queue_capacity) ? queue_capacity : depth;
+        mailbox->depth_limit = static_cast<u16>(clamped);
+        return ok();
+    }
+
     /* Register task with mailbox */
     result<void, error_code> register_task(u16 task_id, platform::task_handle_t handle = nullptr) noexcept {
-        if (find_mailbox(task_id) != nullptr) {
-            return ok(); /* Already registered */
-        }
-        
-        if (mailboxes_.full()) {
+        // Ensure vector index equals task_id for O(1) lookup in find_mailbox()
+        if (task_id >= MaxTasks) {
             return result<void, error_code>(error_code::out_of_memory);
         }
-        
-        /* Resize to add new mailbox in-place */
-        size_t idx = mailboxes_.size();
-        mailboxes_.resize(idx + 1);
-        mailboxes_[idx].task_id = task_id;
-        mailboxes_[idx].handle = handle;
-        
+
+        // Expand vector up to task_id + 1, initializing default mailboxes
+        if (mailboxes_.size() <= task_id) {
+            const size_t prev_size = mailboxes_.size();
+            const size_t new_size = static_cast<size_t>(task_id) + 1U;
+            // Check capacity before resize
+            if (new_size > mailboxes_.capacity()) {
+                return result<void, error_code>(error_code::out_of_memory);
+            }
+            mailboxes_.resize(new_size);
+            // Initialize any newly created slots to empty task_id
+            for (size_t i = prev_size; i < new_size; ++i) {
+                mailboxes_[i].task_id = 0xFFFF;
+                mailboxes_[i].handle = nullptr;
+            }
+        }
+
+        // If already registered at correct index, just update handle
+        if (mailboxes_[task_id].task_id == task_id) {
+            mailboxes_[task_id].handle = handle;
+            return ok();
+        }
+
+        // Register mailbox at index == task_id
+        mailboxes_[task_id].task_id = task_id;
+        mailboxes_[task_id].handle = handle;
         return ok();
     }
     
@@ -168,7 +254,7 @@ public:
         }
         
         /* Add subscriber */
-        if (topic->subscriber_ids.full()) {
+        if (topic->subscriber_ids.size() >= topic->capacity_limit) {
             return result<void, error_code>(error_code::out_of_memory);
         }
         
@@ -186,7 +272,10 @@ public:
     /* Publish message to topic */
     result<void, error_code> publish(u16 topic_id, MessageType& msg, u16 from_task_id) noexcept {
         msg.header.sender_id = from_task_id;
-        msg.header.timestamp = platform::get_system_time_us();
+        // Only set timestamp if producer hasn't set it (allows end-to-end latency measurement)
+        if (msg.header.timestamp == 0) {
+            msg.header.timestamp = platform::get_system_time_us();
+        }
         msg.header.sequence_number = sequence_++;
         msg.header.type = topic_id;
         
@@ -263,7 +352,8 @@ public:
         bool sent_any = false;
         for (auto& mailbox : mailboxes_) {
             if (mailbox.task_id != 0xFFFF) {
-                if (mailbox.send(msg)) {
+                auto send_result = mailbox.send(msg);
+                if (send_result.is_ok()) {
                     sent_count_++;
                     sent_any = true;
                 } else {
@@ -279,6 +369,26 @@ public:
     [[nodiscard]] u32 total_received() const noexcept { return received_count_; }
     [[nodiscard]] u32 total_dropped() const noexcept { return dropped_count_; }
     [[nodiscard]] size_t mailbox_count() const noexcept { return mailboxes_.size(); }
+
+    /* Configure per-topic subscriber capacity (soft cap) */
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    result<void, error_code> set_topic_capacity(u16 topic_id, size_t max_subs) noexcept {
+        topic_subscription* topic = find_topic(topic_id);
+        if (topic == nullptr) {
+            // Create topic with default capacity if it doesn't exist yet
+            if (topics_.full()) {
+                return result<void, error_code>(error_code::out_of_memory);
+            }
+            auto insert_pos = etl::upper_bound(topics_.begin(), topics_.end(), topic_id,
+                [](u16 topic_identifier, const topic_subscription& topic) {
+                    return topic_identifier < topic.topic_id;
+                });
+            topic = &(*topics_.insert(insert_pos, topic_subscription(topic_id)));
+        }
+        size_t clamped = max_subs > max_subscribers_per_topic ? max_subscribers_per_topic : max_subs;
+        topic->capacity_limit = static_cast<u16>(clamped);
+        return ok();
+    }
 };
 
 }  // namespace emCore::messaging

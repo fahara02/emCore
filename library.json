@@ -1,0 +1,70 @@
+{
+    "name": "emCore",
+    "version": "1.0.0",
+    "description": "Production-grade embedded task management and messaging library",
+    "keywords": [
+        "embedded",
+        "rtos",
+        "tasks",
+        "messaging",
+        "pub-sub",
+        "esp32",
+        "mcu",
+        "header-only"
+    ],
+    "authors": [
+        {
+            "name": "emCore Team",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "homepage": "https://github.com/emCore/emCore",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/emCore/emCore.git"
+    },
+    "frameworks": [
+        "arduino",
+        "espidf"
+    ],
+    "platforms": [
+        "espressif32",
+        "espressif8266",
+        "ststm32",
+        "nordicnrf52"
+    ],
+    "headers": [
+        "emCore/task/task_config.hpp",
+        "emCore/task/taskmaster.hpp",
+        "emCore/messaging/pub_sub.hpp"
+    ],
+    "dependencies": [
+        {
+            "name": "ETL",
+            "version": "^20.43.0",
+            "platforms": "*"
+        }
+    ],
+    "build": {
+        "flags": [
+            "-std=gnu++17",
+            "-fno-rtti",
+            "-fno-exceptions"
+        ],
+        "includeDir": "src",
+        "srcDir": "src",
+        "srcFilter": [
+            "+<*>",
+            "+<emCore_dummy.cpp>"
+        ],
+        "extraScript": "scripts/platformio_build.py"
+    },
+    "export": {
+        "include": [
+            "src/*",
+            "scripts/*",
+            "templates/*"
+        ]
+    }
+}

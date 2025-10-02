@@ -10,10 +10,19 @@
  * 
  * To modify task configuration, edit: {yaml_source}
  */
-
+#include <emCore/core/types.hpp>
 #include <emCore/task/task_config.hpp>
+#include <emCore/messaging/message_broker.hpp>
+#include <emCore/task/taskmaster.hpp>
+#include <emCore/task/watchdog.hpp>
+#include <emCore/diagnostics/profiler.hpp>
+#include <emCore/diagnostics/health_monitor.hpp>
+#include <emCore/task/rtos_scheduler.hpp>
+#include <emCore/platform/platform.hpp>
 
 namespace emCore {{
+
+{message_types}
 
 /**
  * Forward declarations of task entry functions
@@ -32,5 +41,7 @@ constexpr task_config task_table[] = {{
  * Number of tasks in the configuration table
  */
 constexpr size_t task_table_size = sizeof(task_table) / sizeof(task_config);
+
+{communication_setup}
 
 }}  /* namespace emCore */

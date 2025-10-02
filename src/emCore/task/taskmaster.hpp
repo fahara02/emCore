@@ -203,7 +203,7 @@ public:
         tcb.state = task_state::ready;
         tcb.created_time = get_current_time();
         tcb.period_ms = cfg.period_ms;
-        tcb.stack_size = cfg.stack_size;
+        tcb.stack_size = cfg.stack_size.value();
         tcb.is_native = true;
         
         /* Reserve space to prevent reallocation invalidating pointers */
@@ -229,11 +229,13 @@ public:
         platform::task_create_params params{
             cfg.function,
             cfg.name,  /* Already const char* */
-            cfg.stack_size,
+            cfg.stack_size.value(),
             task_param,  /* Pass task ID as parameter */
-            cfg.rtos_priority,
+            cfg.rtos_priority.value(),
             handle_ptr,  /* Use stable pointer */
-            false
+            false,  /* start_suspended */
+            (cfg.cpu_affinity.value() >= 0),  /* pin_to_core */
+            static_cast<int>(cfg.cpu_affinity.value())  /* core_id */
         };
         
         if (!platform::create_native_task(params)) {
@@ -533,6 +535,16 @@ public:
     
     /* Debug: Get mailbox count */
     [[nodiscard]] static size_t mailbox_count() noexcept { return get_broker().mailbox_count(); }
+
+    /* Configure per-task mailbox depth (soft cap) */
+    result<void, error_code> set_mailbox_depth(task_id_t task_id, size_t depth) noexcept {
+        return get_broker().set_mailbox_depth(static_cast<u16>(task_id), depth);
+    }
+
+    /* Configure per-topic subscriber capacity (soft cap) */
+    result<void, error_code> set_topic_capacity(topic_id_t topic_id, size_t max_subs) noexcept {
+        return get_broker().set_topic_capacity(static_cast<u16>(topic_id.value), max_subs);
+    }
 };
 
 }  // namespace emCore
