@@ -2,10 +2,11 @@
 
 #include "../core/types.hpp"
 #include "../core/config.hpp"
+#include "../error/result.hpp"
 #include <etl/vector.h>
 #include <etl/deque.h>
 #include <etl/queue.h>
-#include <etl/function.h>
+#include <etl/delegate.h>
 #include <etl/variant.h>
 #include <etl/array.h>
 
@@ -47,9 +48,9 @@ namespace emCore {
     };
     
     /**
-     * @brief Event handler function signature
+     * @brief Event handler delegate signature (no dynamic allocation)
      */
-    using event_handler_t = etl::function<void(const event&), 32>;
+    using event_handler_t = etl::delegate<void(const event&)>;
     
     /**
      * @brief Event handler registration
