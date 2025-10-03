@@ -3,12 +3,15 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include "../error/result.hpp"
+#include "../platform/platform.hpp"
+#include <cstddef>
 #include <etl/vector.h>
 #include <etl/deque.h>
 #include <etl/queue.h>
 #include <etl/delegate.h>
 #include <etl/variant.h>
 #include <etl/array.h>
+#include <etl/monostate.h>
 
 namespace emCore {
     
@@ -39,13 +42,16 @@ namespace emCore {
         
         event() noexcept : id(invalid_event_id), timestamp(0) {}
         
-        event(event_id_t event_id, timestamp_t time = 0) noexcept 
+        explicit event(event_id_t event_id, timestamp_t time = 0) noexcept 
             : id(event_id), timestamp(time) {}
         
         template<typename T>
         event(event_id_t event_id, const T& event_data, timestamp_t time = 0) noexcept
             : id(event_id), timestamp(time), data(event_data) {}
     };
+    
+    // Queue container type with fixed capacity
+    using event_queue_container_t = etl::deque<event, emCore::config::event_queue_size>;
     
     /**
      * @brief Event handler delegate signature (no dynamic allocation)
@@ -56,15 +62,12 @@ namespace emCore {
      * @brief Event handler registration
      */
     struct event_handler_registration {
-        event_id_t event_id;
-        event_handler_t handler;
-        priority priority_level;
-        bool active;
+        event_id_t event_id{invalid_event_id};
+        event_handler_t handler{};
+        priority priority_level{priority::normal};
+        bool active{false};
         
-        event_handler_registration() noexcept 
-            : event_id(invalid_event_id)
-            , priority_level(priority::normal)
-            , active(false) {}
+        event_handler_registration() noexcept = default;
     };
     
     /**
@@ -73,14 +76,13 @@ namespace emCore {
     class event_dispatcher {
     private:
         etl::vector<event_handler_registration, config::max_event_handlers> handlers_;
-        using event_queue_container_t = etl::deque<event, config::event_queue_size>;
-        etl::queue<event, event_queue_container_t> event_queue_;
-        bool initialized_;
+        event_queue_container_t event_queue_;
+        bool initialized_{false};
         
-        timestamp_t get_current_time() const noexcept;
+        static timestamp_t get_current_time() noexcept { return platform::get_system_time(); }
         
     public:
-        event_dispatcher() noexcept : initialized_(false) {}
+        event_dispatcher() noexcept = default;
         
         /**
          * @brief Initialize the event dispatcher
@@ -88,7 +90,7 @@ namespace emCore {
          */
         result<void, error_code> initialize() noexcept {
             initialized_ = true;
-            return {};
+            return ok();
         }
         
         /**
@@ -104,11 +106,11 @@ namespace emCore {
             priority prio = priority::normal
         ) noexcept {
             if (!initialized_) {
-                return error_code::not_initialized;
+                return result<void, error_code>(error_code::not_initialized);
             }
             
             if (handlers_.full()) {
-                return error_code::out_of_memory;
+                return result<void, error_code>(error_code::out_of_memory);
             }
             
             event_handler_registration registration;
@@ -118,7 +120,7 @@ namespace emCore {
             registration.active = true;
             
             handlers_.push_back(registration);
-            return {};
+            return ok();
         }
         
         /**
@@ -128,17 +130,17 @@ namespace emCore {
          */
         result<void, error_code> unregister_handler(event_id_t event_id) noexcept {
             if (!initialized_) {
-                return error_code::not_initialized;
+                return result<void, error_code>(error_code::not_initialized);
             }
             
             for (auto& handler : handlers_) {
                 if (handler.event_id == event_id && handler.active) {
                     handler.active = false;
-                    return {};
+                    return ok();
                 }
             }
             
-            return error_code::not_found;
+            return result<void, error_code>(error_code::not_found);
         }
         
         /**
@@ -148,11 +150,11 @@ namespace emCore {
          */
         result<void, error_code> post_event(const event& evt) noexcept {
             if (!initialized_) {
-                return error_code::not_initialized;
+                return result<void, error_code>(error_code::not_initialized);
             }
             
             if (event_queue_.full()) {
-                return error_code::out_of_memory;
+                return result<void, error_code>(error_code::out_of_memory);
             }
             
             event timestamped_event = evt;
@@ -160,8 +162,8 @@ namespace emCore {
                 timestamped_event.timestamp = get_current_time();
             }
             
-            event_queue_.push(timestamped_event);
-            return {};
+            event_queue_.push_back(timestamped_event);
+            return ok();
         }
         
         /**
@@ -197,7 +199,7 @@ namespace emCore {
             size_t processed = 0;
             while (!event_queue_.empty() && processed < max_events) {
                 event current_event = event_queue_.front();
-                event_queue_.pop();
+                event_queue_.pop_front();
                 
                 // Find and call handlers for this event
                 for (const auto& handler : handlers_) {
