@@ -88,37 +88,51 @@ inline timestamp_t get_system_time() noexcept {
     return get_system_time_us() / 1000;
 }
 
+// Global logging control - set to 0 to disable all platform logging
+#ifndef EMCORE_ENABLE_LOGGING
+#define EMCORE_ENABLE_LOGGING 0
+#endif
+
 // Platform-specific logging function
 inline void log(const char* message) noexcept {
-    #if defined(ARDUINO)
-        // Arduino: Use Serial
-        Serial.println(message);
-    #elif defined(EMCORE_PLATFORM_STM32)
-        // STM32: Use ITM (Instrumentation Trace Macrocell) for debug output
-        if ((ITM->TCR & ITM_TCR_ITMENA_Msk) && (ITM->TER & 1UL)) {
-            // ITM is enabled, send via ITM port 0
-            const char* ptr = message;
-            while (*ptr) {
-                ITM_SendChar(*ptr++);
+    #if EMCORE_ENABLE_LOGGING
+        #if defined(ARDUINO)
+            // Arduino: Use Serial
+            Serial.println(message);
+        #elif defined(EMCORE_PLATFORM_STM32)
+            // STM32: Use ITM (Instrumentation Trace Macrocell) for debug output
+            if ((ITM->TCR & ITM_TCR_ITMENA_Msk) && (ITM->TER & 1UL)) {
+                // ITM is enabled, send via ITM port 0
+                const char* ptr = message;
+                while (*ptr) {
+                    ITM_SendChar(*ptr++);
+                }
+                ITM_SendChar('\n');
             }
-            ITM_SendChar('\n');
-        }
+        #else
+            // Generic: No logging (placeholder)
+            (void)message;
+        #endif
     #else
-        // Generic: No logging (placeholder)
+        // Logging disabled
         (void)message;
     #endif
 }
 
 // Platform-specific formatted logging functions
 inline void logf(const char* format, u32 arg1) noexcept {
-    #if defined(ARDUINO)
-        char buffer[256];
-        snprintf(buffer, sizeof(buffer), format, arg1);
-        Serial.println(buffer);
-    #elif defined(EMCORE_PLATFORM_STM32)
-        char buffer[256];
-        snprintf(buffer, sizeof(buffer), format, arg1);
-        log(buffer);
+    #if EMCORE_ENABLE_LOGGING
+        #if defined(ARDUINO)
+            char buffer[256];
+            snprintf(buffer, sizeof(buffer), format, arg1);
+            Serial.println(buffer);
+        #elif defined(EMCORE_PLATFORM_STM32)
+            char buffer[256];
+            snprintf(buffer, sizeof(buffer), format, arg1);
+            log(buffer);
+        #else
+            (void)format; (void)arg1;
+        #endif
     #else
         (void)format; (void)arg1;
     #endif
