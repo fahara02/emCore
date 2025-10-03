@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../core/types.hpp"
-#include "../core/config.hpp"
+#include "../core/strong_types.hpp"
 #include "watchdog.hpp"  // For watchdog_action enum
 
 namespace emCore {
@@ -29,8 +29,8 @@ using cpu_affinity_core = core::strong_type_generator<i8>::type;
 
 // Convenience factory functions for advanced attributes
 namespace make {
-    constexpr watchdog_timeout_ms watchdog_timeout(u32 ms) noexcept { return watchdog_timeout_ms(ms); }
-    constexpr max_execution_us max_execution(u32 us) noexcept { return max_execution_us(us); }
+    constexpr watchdog_timeout_ms watchdog_timeout(u32 millis) noexcept { return watchdog_timeout_ms(millis); }
+    constexpr max_execution_us max_execution(u32 micros) noexcept { return max_execution_us(micros); }
     constexpr cpu_affinity_core cpu_affinity(i8 core) noexcept { return cpu_affinity_core(core); }
 }
 

@@ -56,7 +56,7 @@ constexpr size_t large_payload_size = 256;  /* Large messages */
 template<size_t MaxPayloadSize = medium_payload_size>
 struct message_envelope {
     message_header header{};
-    u8 payload[MaxPayloadSize]{};
+    alignas(4) u8 payload[MaxPayloadSize]{};  // 4-byte alignment for safe MCU access
     
     message_envelope() = default;
     

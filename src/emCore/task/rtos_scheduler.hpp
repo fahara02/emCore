@@ -203,7 +203,7 @@ public:
             if (context->deadline_us > 0 && execution_time > context->deadline_us) {
                 // Log deadline miss (integrate with error system)
                 platform::logf("DEADLINE MISS: Task %u took %u us (limit: %u us)",
-                              static_cast<u32>(task_id), execution_time, context->deadline_us);
+                              static_cast<u32>(task_id.value()), execution_time, context->deadline_us);
             }
         }
     }
@@ -226,7 +226,7 @@ public:
             // Warn if stack usage > 80%
             if (context->stack_used_bytes > (context->stack_size_bytes * 80 / 100)) {
                 platform::logf("STACK WARNING: Task %u using %u/%u bytes",
-                              static_cast<u32>(task_id),
+                              static_cast<u32>(task_id.value()),
                               static_cast<u32>(context->stack_used_bytes),
                               static_cast<u32>(context->stack_size_bytes));
             }
@@ -270,8 +270,8 @@ public:
                 static_cast<u32>(context.total_execution_time_us / context.execution_count) : 0;
             
             platform::logf("Task %u: %u executions, avg %u us",
-                          static_cast<u32>(task_ids_[i]),
-                          context.execution_count,
+                          static_cast<u32>(task_ids_[i].value()),
+                          context.execution_count,  
                           avg_execution_us);
         }
         platform::log("=== END SCHEDULER REPORT ===");

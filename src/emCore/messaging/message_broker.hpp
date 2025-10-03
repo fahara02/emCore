@@ -28,47 +28,117 @@ private:
     static constexpr size_t max_topics = config::default_max_topics;
     static constexpr size_t max_subscribers_per_topic = config::default_max_subscribers_per_topic;
     
-    /* Task mailbox with MPSC dual-queue (high/normal) for priority-aware delivery */
+    /* Task mailbox with per-topic sub-queues (each with high/normal) */
     struct task_mailbox {
         u16 task_id{0xFFFF};
-        // Split capacity: reserve 1/4 for high priority (at least 1), rest for normal
-        static constexpr size_t high_capacity = (queue_capacity < 4) ? 1 : (queue_capacity / 4);
-        static constexpr size_t normal_capacity = (queue_capacity > high_capacity) ? (queue_capacity - high_capacity) : 0;
-        etl::circular_buffer<MessageType, high_capacity> high_queue;
-        etl::circular_buffer<MessageType, normal_capacity> normal_queue;
         platform::task_handle_t handle{nullptr};
         mutable platform::critical_section critical_section;
-        // Soft limit for total depth across both queues (<= queue_capacity)
+        // Soft limit across all per-topic queues
         u16 depth_limit{static_cast<u16>(queue_capacity)};
-        // Per-mailbox statistics
+        // Stats
         u32 dropped_overflow{0};
         u32 received_count{0};
-        // Overflow behavior: if true, drop oldest (prefer normal) to make room; otherwise reject new message
         bool overflow_drop_oldest{true};
-        
+        bool notify_on_empty_only{true};
+
+        // Compile-time per-topic capacities
+        static constexpr size_t topic_slots = config::default_max_topic_queues_per_mailbox;
+        static_assert(config::default_topic_high_ratio_den != 0, "default_topic_high_ratio_den must not be zero");
+        static constexpr size_t min_per_topic_total = 2;
+        static constexpr size_t per_topic_total = ((queue_capacity / topic_slots) >= min_per_topic_total)
+                                                  ? (queue_capacity / topic_slots)
+                                                  : min_per_topic_total;
+        static constexpr size_t calc_high = (per_topic_total * config::default_topic_high_ratio_num)
+                                            / config::default_topic_high_ratio_den;
+        static constexpr size_t high_capacity = (calc_high >= 1) ? calc_high : 1;
+        static constexpr size_t normal_capacity_tmp = (per_topic_total > high_capacity)
+                                                      ? (per_topic_total - high_capacity)
+                                                      : 0;
+        static constexpr size_t normal_capacity = (normal_capacity_tmp >= 1) ? normal_capacity_tmp : 1;
+
+        struct topic_queue_entry {
+            u16 topic_id{0xFFFF};
+            etl::circular_buffer<MessageType, high_capacity> high_queue;
+            etl::circular_buffer<MessageType, normal_capacity> normal_queue;
+        };
+
+        etl::vector<topic_queue_entry, topic_slots> topic_queues;
+
         task_mailbox() = default;
-        
-        size_t total_size() const noexcept { return high_queue.size() + normal_queue.size(); }
-        bool is_empty_unlocked() const noexcept { return high_queue.empty() && normal_queue.empty(); }
-        
-        /* Thread-safe send with total soft depth limit and overflow policy */
+
+        size_t total_size() const noexcept {
+            size_t total = 0;
+            for (const auto& topic_queue : topic_queues) {
+                total += topic_queue.high_queue.size();
+                total += topic_queue.normal_queue.size();
+            }
+            return total;
+        }
+
+        bool is_empty_unlocked() const noexcept {
+            for (const auto& topic_queue : topic_queues) {
+                if (!topic_queue.high_queue.empty() || !topic_queue.normal_queue.empty()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        int find_topic_index(u16 topic_id) const noexcept {
+            for (size_t i = 0; i < topic_queues.size(); ++i) {
+                if (topic_queues[i].topic_id == topic_id) {
+                    return static_cast<int>(i);
+                }
+            }
+            return -1;
+        }
+
+        topic_queue_entry* get_or_create_topic(u16 topic_id) noexcept {
+            int idx = find_topic_index(topic_id);
+            if (idx >= 0) {
+                return &topic_queues[static_cast<size_t>(idx)];
+            }
+            if (topic_queues.full()) {
+                return nullptr;
+            }
+            topic_queue_entry entry;
+            entry.topic_id = topic_id;
+            topic_queues.push_back(entry);
+            return &topic_queues.back();
+        }
+
+        // Drop one message to make room (prefer normal across topics)
+        bool drop_one_any() noexcept {
+            // Prefer dropping from normal queues
+            for (auto& topic_queue : topic_queues) {
+                if (!topic_queue.normal_queue.empty()) { topic_queue.normal_queue.pop(); return true; }
+            }
+            // Then drop from high queues
+            for (auto& topic_queue : topic_queues) {
+                if (!topic_queue.high_queue.empty()) { topic_queue.high_queue.pop(); return true; }
+            }
+            return false;
+        }
+
+        /* Thread-safe send with per-topic routing and notify-on-empty */
         result<void, error_code> send(const MessageType& msg) noexcept {
             const bool is_urgent = (static_cast<message_flags>(msg.header.flags) & message_flags::urgent) == message_flags::urgent
                                    || (msg.header.priority >= static_cast<u8>(message_priority::high));
             critical_section.enter();
-            
+
+            bool was_empty = is_empty_unlocked();
             const bool depth_reached = (total_size() >= depth_limit);
-            bool target_full = is_urgent ? high_queue.full() : normal_queue.full();
+
+            topic_queue_entry* topic_queue = get_or_create_topic(msg.header.type);
+            if (topic_queue == nullptr) {
+                critical_section.exit();
+                return result<void, error_code>(error_code::out_of_memory);
+            }
+
+            bool target_full = is_urgent ? topic_queue->high_queue.full() : topic_queue->normal_queue.full();
             if (target_full || depth_reached) {
-                // Respect persistent flag: reject new instead of dropping oldest
                 const bool is_persistent = (static_cast<message_flags>(msg.header.flags) & message_flags::persistent) == message_flags::persistent;
-                if (!is_persistent && overflow_drop_oldest && !is_empty_unlocked()) {
-                    // Prefer dropping from normal queue; if empty, drop from high
-                    if (!normal_queue.empty()) {
-                        normal_queue.pop();
-                    } else if (!high_queue.empty()) {
-                        high_queue.pop();
-                    }
+                if (!is_persistent && overflow_drop_oldest && drop_one_any()) {
                     dropped_overflow++;
                     // fallthrough to push
                 } else {
@@ -76,68 +146,72 @@ private:
                     return result<void, error_code>(error_code::out_of_memory);
                 }
             }
-            
+
             if (is_urgent) {
-                if (!high_queue.full()) {
-                    high_queue.push(msg);
-                } else if (!normal_queue.full()) {
-                    normal_queue.push(msg);
+                if (!topic_queue->high_queue.full()) {
+                    topic_queue->high_queue.push(msg);
+                } else if (!topic_queue->normal_queue.full()) {
+                    topic_queue->normal_queue.push(msg);
                 } else {
                     critical_section.exit();
                     return result<void, error_code>(error_code::out_of_memory);
                 }
             } else {
-                if (!normal_queue.full()) {
-                    normal_queue.push(msg);
-                } else if (!high_queue.full()) {
-                    high_queue.push(msg);
+                if (!topic_queue->normal_queue.full()) {
+                    topic_queue->normal_queue.push(msg);
+                } else if (!topic_queue->high_queue.full()) {
+                    topic_queue->high_queue.push(msg);
                 } else {
                     critical_section.exit();
                     return result<void, error_code>(error_code::out_of_memory);
                 }
             }
+
+            bool should_notify = notify_on_empty_only ? was_empty : true;
             critical_section.exit();
-            
-            /* Notify task */
-            if (handle != nullptr) {
+
+            if (should_notify && handle != nullptr) {
                 platform::notify_task(handle, 0x01);
             }
-            
             return ok();
         }
-        
-        /* Thread-safe receive (drain high priority first) */
+
+        /* Thread-safe receive: drain high across topics, then normal */
         result<MessageType, error_code> receive() noexcept {
             critical_section.enter();
-            
-            if (high_queue.empty() && normal_queue.empty()) {
+            if (is_empty_unlocked()) {
                 critical_section.exit();
                 return result<MessageType, error_code>(error_code::not_found);
             }
-            
-            MessageType msg;
-            if (!high_queue.empty()) {
-                msg = high_queue.front();
-                high_queue.pop();
-            } else {
-                msg = normal_queue.front();
-                normal_queue.pop();
+            // First pass: high priority
+            for (auto& topic_queue : topic_queues) {
+                if (!topic_queue.high_queue.empty()) {
+                    MessageType msg = topic_queue.high_queue.front();
+                    topic_queue.high_queue.pop();
+                    received_count++;
+                    bool now_empty = is_empty_unlocked();
+                    critical_section.exit();
+                    if (now_empty) { platform::clear_notification(); }
+                    return result<MessageType, error_code>(msg);
+                }
             }
-            received_count++;
-            
-            bool now_empty = high_queue.empty() && normal_queue.empty();
+            // Second pass: normal priority
+            for (auto& topic_queue : topic_queues) {
+                if (!topic_queue.normal_queue.empty()) {
+                    MessageType msg = topic_queue.normal_queue.front();
+                    topic_queue.normal_queue.pop();
+                    received_count++;
+                    bool now_empty = is_empty_unlocked();
+                    critical_section.exit();
+                    if (now_empty) { platform::clear_notification(); }
+                    return result<MessageType, error_code>(msg);
+                }
+            }
             critical_section.exit();
-            
-            if (now_empty) {
-                platform::clear_notification();
-            }
-            
-            return result<MessageType, error_code>(msg);
+            return result<MessageType, error_code>(error_code::not_found);
         }
-        
-        bool empty() const noexcept {
-            return high_queue.empty() && normal_queue.empty();
-        }
+
+        bool empty() const noexcept { return is_empty_unlocked(); }
     };
     
     /* Topic subscription */
@@ -160,6 +234,7 @@ private:
     u32 received_count_{0};
     u32 dropped_count_{0};
     u16 sequence_{0};
+    bool notify_on_empty_only_{true};
     
     /* Find mailbox by task ID - O(1) lookup */
     task_mailbox* find_mailbox(u16 task_id) noexcept {
@@ -233,6 +308,26 @@ public:
         // Register mailbox at index == task_id
         mailboxes_[task_id].task_id = task_id;
         mailboxes_[task_id].handle = handle;
+        return ok();
+    }
+
+    /* Configure per-mailbox overflow policy */
+    result<void, error_code> set_overflow_policy(u16 task_id, bool drop_oldest) noexcept {
+        task_mailbox* mailbox = find_mailbox(task_id);
+        if (mailbox == nullptr) {
+            return result<void, error_code>(error_code::not_found);
+        }
+        mailbox->overflow_drop_oldest = drop_oldest;
+        return ok();
+    }
+
+    /* Configure global notify policy for all mailboxes */
+    result<void, error_code> set_notify_on_empty_only(bool enabled) noexcept {
+        for (auto& mailbox : mailboxes_) {
+            if (mailbox.task_id != 0xFFFF) {
+                mailbox.notify_on_empty_only = enabled;
+            }
+        }
         return ok();
     }
     

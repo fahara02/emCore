@@ -9,6 +9,8 @@
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
 #include "../messaging/message_types.hpp"
+#include "rtos_scheduler.hpp"
+#include "watchdog.hpp"
 
 #include <etl/vector.h>
 #include <etl/algorithm.h>
@@ -64,7 +66,7 @@ struct task_control_block {
 class taskmaster {
 private:
     etl::vector<task_control_block, config::max_tasks> tasks_;
-    task_id_t next_task_id_{0};
+    task_id_t next_task_id_{invalid_task_id};
     bool initialized_{false};
     
     volatile bool tasks_ready_{false};  /* Flag to signal tasks can start */
@@ -89,12 +91,12 @@ private:
     
     task_control_block* find_task(task_id_t task_id) noexcept {
         // O(1) lookup using task_id as direct index
-        if (task_id >= tasks_.size()) {
+        if (task_id.value() >= tasks_.size()) {
             return nullptr;
         }
         
         // Verify the task at this index has the correct ID
-        auto& task = tasks_[task_id];
+        auto& task = tasks_[task_id.value()];
         return (task.id == task_id) ? &task : nullptr;
     }
     
@@ -117,7 +119,7 @@ public:
         }
         
         tasks_.clear();
-        next_task_id_ = 0;
+        next_task_id_.value() = 0;
         scheduler_start_time_ = get_current_time();
         total_context_switches_ = 0;
         total_idle_time_ = 0;
@@ -148,7 +150,7 @@ public:
                 task_id_t task_id = res.value();
                 auto* tcb = find_task(task_id);
                 if (tcb != nullptr) {
-                    get_broker().register_task(task_id, tcb->native_handle);
+                    get_broker().register_task(task_id.value(), tcb->native_handle);
                 }
             }
         }
@@ -217,17 +219,13 @@ public:
         /* Get stable pointer to handle slot */
         auto* handle_ptr = &tasks_.back().native_handle;
         
-        /* Use provided parameters or store task ID in TCB for access */
-        void* task_param = cfg.parameters;
-        if (task_param == nullptr) {
-            /* Store task ID in TCB and pass pointer to TCB */
-            task_param = &tasks_.back();
-        }
+        /* Always pass pointer to TCB to trampoline; user params forwarded inside */
+        void* task_param = &tasks_.back();
         
         
         /* Now create actual RTOS task - it will start immediately */
         platform::task_create_params params{
-            cfg.function,
+            &taskmaster::native_task_trampoline,
             cfg.name,  /* Already const char* */
             cfg.stack_size.value(),
             task_param,  /* Pass task ID as parameter */
@@ -244,6 +242,46 @@ public:
         }
         
         return result<task_id_t, error_code>(tcb.id);
+    }
+
+private:
+    /* Native task trampoline to enforce periodic scheduling and instrumentation */
+    static void native_task_trampoline(void* param) noexcept {
+        if (param == nullptr) {
+            return;
+        }
+        auto* tcb = static_cast<task_control_block*>(param);
+        auto& task_mgr = taskmaster::instance();
+
+        /* Ensure system init completed if used */
+        task_mgr.wait_until_ready();
+
+        const task_id_t tid = tcb->id;
+        auto* user_fn = tcb->function;
+        if (user_fn == nullptr) {
+            return;
+        }
+        /* Forward user parameter if provided; otherwise pass TCB pointer */
+        void* user_param = (tcb->parameters != nullptr) ? tcb->parameters : static_cast<void*>(tcb);
+
+        if (tcb->period_ms > 0) {
+            for (;;) {
+                emCore::task::get_global_scheduler().start_execution_timing(tid);
+                user_fn(user_param);
+                emCore::task::get_global_scheduler().end_execution_timing(tid);
+                emCore::get_global_watchdog().feed(tid);
+                emCore::task::get_global_scheduler().update_stack_usage(tid);
+                emCore::task::get_global_scheduler().adaptive_yield(tid);
+                emCore::platform::delay_ms(tcb->period_ms);
+            }
+        } else {
+            /* Non-periodic: call once; user may implement its own loop */
+            emCore::task::get_global_scheduler().start_execution_timing(tid);
+            user_fn(user_param);
+            emCore::task::get_global_scheduler().end_execution_timing(tid);
+            /* One-time feed to avoid early false positive */
+            emCore::get_global_watchdog().feed(tid);
+        }
     }
     
     result<void, error_code> start_task(task_id_t task_id) noexcept {
@@ -289,7 +327,7 @@ public:
             
             auto* tcb = find_task(task_id);
             if (tcb != nullptr) {
-                get_broker().register_task(task_id, tcb->native_handle);
+                get_broker().register_task(task_id.value(), tcb->native_handle);
             }
         }
         return ok();
@@ -432,7 +470,7 @@ public:
     }
     
     /* Task deadline management */
-    /* NOLINTNEXTLINE(bugprone-easily-swappable-parameters) - task_id and deadline_ms are semantically different */
+   
     result<void, error_code> set_task_deadline(task_id_t task_id, duration_t deadline_ms) noexcept {
         auto* task = find_task(task_id);
         if (task == nullptr) {
@@ -501,25 +539,25 @@ public:
     
     /* Subscribe task to a topic */
     static result<void, error_code> subscribe(topic_id_t topic_id, task_id_t task_id) noexcept {
-        return get_broker().subscribe(topic_id, task_id);
+        return get_broker().subscribe(topic_id, task_id.value());
     }
     
     /* Publish message to topic */
     template<typename MessageType = medium_message>
     result<void, error_code> publish(u16 topic_id, MessageType& msg, task_id_t from_task_id) noexcept {
-        return get_broker().publish(topic_id, msg, from_task_id);
+        return get_broker().publish(topic_id, msg, from_task_id.value());
     }
     
     /* Receive message (blocking) */
     template<typename MessageType = medium_message>
     result<MessageType, error_code> receive(task_id_t task_id, timeout_ms_t timeout = timeout_ms_t::infinite()) noexcept {
-        return get_broker().receive(task_id, timeout);
+        return get_broker().receive(task_id.value(), timeout);
     }
     
     /* Receive message (non-blocking) */
     template<typename MessageType = medium_message>
     result<MessageType, error_code> try_receive(task_id_t task_id) noexcept {
-        return get_broker().try_receive(task_id);
+        return get_broker().try_receive(task_id.value());
     }
     
     /* Broadcast to all tasks */
@@ -537,13 +575,23 @@ public:
     [[nodiscard]] static size_t mailbox_count() noexcept { return get_broker().mailbox_count(); }
 
     /* Configure per-task mailbox depth (soft cap) */
-    result<void, error_code> set_mailbox_depth(task_id_t task_id, size_t depth) noexcept {
-        return get_broker().set_mailbox_depth(static_cast<u16>(task_id), depth);
+    static result<void, error_code> set_mailbox_depth(task_id_t task_id, size_t depth) noexcept {
+        return get_broker().set_mailbox_depth(task_id.value(), depth);
     }
 
     /* Configure per-topic subscriber capacity (soft cap) */
-    result<void, error_code> set_topic_capacity(topic_id_t topic_id, size_t max_subs) noexcept {
-        return get_broker().set_topic_capacity(static_cast<u16>(topic_id.value), max_subs);
+    static result<void, error_code> set_topic_capacity(topic_id_t topic_id, size_t max_subs) noexcept {
+        return get_broker().set_topic_capacity(topic_id.value, max_subs);
+    }
+
+    /* Configure per-mailbox overflow policy (true = drop_oldest, false = reject new) */
+    static result<void, error_code> set_overflow_policy(task_id_t task_id, bool drop_oldest) noexcept {
+        return get_broker().set_overflow_policy(task_id.value(), drop_oldest);
+    }
+
+    /* Configure global notify policy (true = notify only on empty->non-empty) */
+    static result<void, error_code> set_notify_on_empty_only(bool enabled) noexcept {
+        return get_broker().set_notify_on_empty_only(enabled);
     }
 };
 

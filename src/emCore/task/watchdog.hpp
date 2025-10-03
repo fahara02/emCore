@@ -92,11 +92,11 @@ private:
                 
             case watchdog_action::log_warning:
                 platform::logf("WATCHDOG: Task %u timeout (%u occurrences)",
-                              entry.task_id, entry.timeout_count);
+                              entry.task_id.value(), entry.timeout_count);
                 break;
                 
             case watchdog_action::reset_task:
-                platform::logf("WATCHDOG: Resetting task %u", entry.task_id);
+                platform::logf("WATCHDOG: Resetting task %u", entry.task_id.value());
                 if (entry.recovery_callback != nullptr) {
                     entry.recovery_callback(entry.task_id);
                 }

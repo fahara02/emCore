@@ -138,7 +138,7 @@ public:
         if (ctx.severity >= error_severity::critical) {
             platform::logf("CRITICAL ERROR: event=%u task=%u code=%u",
                           static_cast<u32>(ctx.event),
-                          static_cast<u32>(ctx.task_id),
+                          static_cast<u32>(ctx.task_id.value()),
                           static_cast<u32>(ctx.code));
         }
     }

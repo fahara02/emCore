@@ -3,12 +3,14 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include "../platform/platform.hpp"
-
 #include <etl/vector.h>
 #include <etl/circular_buffer.h>
+#include <cstddef>
 
-namespace emCore {
-namespace diagnostics {
+ #include <etl/algorithm.h>
+
+
+namespace emCore::diagnostics {
 
 /**
  * @brief Task performance metrics
@@ -47,12 +49,8 @@ struct task_performance_metrics {
         execution_count++;
         total_execution_time_us += execution_time_us;
         
-        if (execution_time_us < min_execution_time_us) {
-            min_execution_time_us = execution_time_us;
-        }
-        if (execution_time_us > max_execution_time_us) {
-            max_execution_time_us = execution_time_us;
-        }
+        min_execution_time_us = etl::min(min_execution_time_us, execution_time_us);
+        max_execution_time_us = etl::max(max_execution_time_us, execution_time_us);
         
         avg_execution_time_us = total_execution_time_us / execution_count;
         last_update_time = platform::get_system_time_us();
@@ -64,12 +62,8 @@ struct task_performance_metrics {
     void update_latency(duration_t latency_us) noexcept {
         message_count++;
         
-        if (latency_us < min_latency_us) {
-            min_latency_us = latency_us;
-        }
-        if (latency_us > max_latency_us) {
-            max_latency_us = latency_us;
-        }
+        min_latency_us = etl::min(min_latency_us, latency_us);
+        max_latency_us = etl::max(max_latency_us, latency_us);
         
         // Simple moving average
         if (avg_latency_us == 0) {
@@ -223,8 +217,10 @@ public:
     /**
      * @brief Record task execution time
      */
-    void record_execution_time(task_id_t task_id, duration_t execution_time_us) noexcept {
-        if (!profiling_enabled_) return;
+    void record_execution_time(task_id_t task_id, duration_t execution_time_us) noexcept { 
+        if (!profiling_enabled_) {
+            return;
+        }
         
         auto* metrics = find_task_metrics(task_id);
         if (metrics != nullptr) {
@@ -245,8 +241,10 @@ public:
     /**
      * @brief Record message latency
      */
-    void record_message_latency(task_id_t task_id, duration_t latency_us) noexcept {
-        if (!profiling_enabled_) return;
+    void record_message_latency(task_id_t task_id, duration_t latency_us) noexcept { 
+        if (!profiling_enabled_) {
+            return;
+        }
         
         auto* metrics = find_task_metrics(task_id);
         if (metrics != nullptr) {
@@ -270,7 +268,9 @@ public:
      * @brief Record error
      */
     void record_error(task_id_t task_id) noexcept {
-        if (!profiling_enabled_) return;
+        if (!profiling_enabled_) {
+            return;
+        }
         
         auto* metrics = find_task_metrics(task_id);
         if (metrics != nullptr) {
@@ -295,14 +295,14 @@ public:
     /**
      * @brief Get system metrics
      */
-    const system_performance_metrics& get_system_metrics() const noexcept {
+    [[nodiscard]] const system_performance_metrics& get_system_metrics() const noexcept {
         return system_metrics_;
     }
     
     /**
      * @brief Get trace buffer
      */
-    const etl::circular_buffer<trace_entry, trace_buffer_size>& get_trace_buffer() const noexcept {
+    [[nodiscard]] const etl::circular_buffer<trace_entry, trace_buffer_size>& get_trace_buffer() const noexcept {
         return trace_buffer_;
     }
     
@@ -310,13 +310,15 @@ public:
      * @brief Update system statistics
      */
     void update_system_stats() noexcept {
-        if (!profiling_enabled_) return;
+        if (!profiling_enabled_) {
+            return;
+        }
         
         system_metrics_.update_uptime();
         
         // Calculate system-wide CPU usage
-        u32 total_cpu_usage = 0;
-        u32 active_tasks = 0;
+        u32 total_cpu_usage = 0;//NOLINT
+        u32 active_tasks = 0;//NOLINT
         
         for (const auto& metrics : task_metrics_) {
             if (metrics.execution_count > 0) {
@@ -375,7 +377,7 @@ public:
         for (size_t i = 0; i < task_ids_.size(); ++i) {
             const auto& metrics = task_metrics_[i];
             if (metrics.execution_count > 0) {
-                platform::logf("Task %u:", task_ids_[i]);
+                platform::logf("Task %u:", task_ids_[i].value());
                 platform::logf("  Executions: %u", metrics.execution_count);
                 platform::logf("  Avg exec time: %u us", metrics.avg_execution_time_us);
                 platform::logf("  Min/Max exec: %u/%u us", 
@@ -402,5 +404,5 @@ inline performance_profiler& get_global_profiler() noexcept {
     return profiler;
 }
 
-} // namespace diagnostics
-} // namespace emCore
+} // namespace emCore::diagnostics
+

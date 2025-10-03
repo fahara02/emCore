@@ -6,6 +6,7 @@
 #include "etl_compat.hpp"
 #include <etl/optional.h>
 #include <etl/string.h>
+ #include "strong_types.hpp"
 
 namespace emCore {
 
@@ -40,9 +41,10 @@ using optional = etl::optional<T>;
 using timestamp_t = u64;
 using duration_t = u32;
 
-/* Task ID type */
-using task_id_t = u16;
-constexpr task_id_t invalid_task_id = 0xFFFF;
+/* Task ID strong type using tag */
+struct task_id_tag final {};
+using task_id_t = core::strong_type<u16, task_id_tag>;
+constexpr task_id_t invalid_task_id = task_id_t(static_cast<u16>(0xFFFF));
 
 /* Topic ID strong type to avoid parameter confusion */
 struct topic_id_t {

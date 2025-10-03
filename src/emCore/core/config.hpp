@@ -44,6 +44,27 @@ namespace emCore::config {
         #else
         constexpr size_t default_max_subscribers_per_topic = 8;
         #endif
+
+        // Mailbox per-topic sub-queues configuration
+        // Number of per-topic queue slots per mailbox
+        #ifdef EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX
+        constexpr size_t default_max_topic_queues_per_mailbox = EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX;
+        #else
+        constexpr size_t default_max_topic_queues_per_mailbox = 4;
+        #endif
+
+        // High-priority reservation ratio for each per-topic queue (numerator/denominator)
+        #ifdef EMCORE_MSG_TOPIC_HIGH_RATIO_NUM
+        constexpr size_t default_topic_high_ratio_num = EMCORE_MSG_TOPIC_HIGH_RATIO_NUM;
+        #else
+        constexpr size_t default_topic_high_ratio_num = 1; // 1/4 by default
+        #endif
+
+        #ifdef EMCORE_MSG_TOPIC_HIGH_RATIO_DEN
+        constexpr size_t default_topic_high_ratio_den = EMCORE_MSG_TOPIC_HIGH_RATIO_DEN;
+        #else
+        constexpr size_t default_topic_high_ratio_den = 4;
+        #endif
         
         // Memory pool configuration
         constexpr size_t small_block_size = 32;

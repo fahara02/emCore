@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/types.hpp"
+#include "../core/strong_types.hpp"
 #include "../core/config.hpp"
 #include "../platform/platform.hpp"
 #include "profiler.hpp"
@@ -8,8 +9,9 @@
 #include <etl/vector.h>
 #include <cstddef>
 
-namespace emCore {
-namespace diagnostics {
+
+
+namespace emCore::diagnostics {
 
 /**
  * @brief Task health status
@@ -55,6 +57,19 @@ struct system_health_status {
     // Overall health
     task_health_status overall_health{task_health_status::unknown};
 };
+
+// Strong types for threshold parameters to prevent argument swapping
+struct cpu_warning_tag final {};
+using cpu_warning_pct = core::strong_type<f32, cpu_warning_tag>;
+
+struct cpu_critical_tag final {};
+using cpu_critical_pct = core::strong_type<f32, cpu_critical_tag>;
+
+struct mem_warning_tag final {};
+using mem_warning_pct = core::strong_type<f32, mem_warning_tag>;
+
+struct mem_critical_tag final {};
+using mem_critical_pct = core::strong_type<f32, mem_critical_tag>;
 
 /**
  * @brief Task health entry
@@ -265,14 +280,14 @@ public:
     /**
      * @brief Get system health status
      */
-    const system_health_status& get_system_health() const noexcept {
+     [[nodiscard]]  const system_health_status& get_system_health() const noexcept {
         return system_health_;
     }
     
     /**
      * @brief Get task health status
      */
-    const task_health_entry* get_task_health(task_id_t task_id) const noexcept {
+    [[nodiscard]] const task_health_entry* get_task_health(task_id_t task_id) const noexcept {
         for (const auto& entry : task_health_) {
             if (entry.task_id == task_id) {
                 return &entry;
@@ -284,7 +299,7 @@ public:
     /**
      * @brief Check if system is healthy
      */
-    bool is_system_healthy() const noexcept {
+    [[nodiscard]] bool is_system_healthy() const noexcept {
         return system_health_.overall_health == task_health_status::healthy ||
                system_health_.overall_health == task_health_status::warning;
     }
@@ -322,7 +337,7 @@ public:
         platform::log("\n--- TASK HEALTH ---");
         for (const auto& entry : task_health_) {
             platform::logf("Task %u: (Errors: %u)",
-                          static_cast<u32>(entry.task_id),
+                          static_cast<u32>(entry.task_id.value()),
                           entry.error_count);
         }
         
@@ -332,12 +347,14 @@ public:
     /**
      * @brief Set health thresholds
      */
-    void set_thresholds(f32 cpu_warning, f32 cpu_critical,
-                       f32 mem_warning, f32 mem_critical) noexcept {
-        cpu_warning_threshold_ = cpu_warning;
-        cpu_critical_threshold_ = cpu_critical;
-        memory_warning_threshold_ = mem_warning;
-        memory_critical_threshold_ = mem_critical;
+    void set_thresholds(cpu_warning_pct cpu_warning,
+                       cpu_critical_pct cpu_critical,
+                       mem_warning_pct mem_warning,
+                       mem_critical_pct mem_critical) noexcept {
+        cpu_warning_threshold_ = cpu_warning.value();
+        cpu_critical_threshold_ = cpu_critical.value();
+        memory_warning_threshold_ = mem_warning.value();
+        memory_critical_threshold_ = mem_critical.value();
     }
 };
 
@@ -349,5 +366,5 @@ inline health_monitor& get_global_health_monitor() noexcept {
     return monitor;
 }
 
-} // namespace diagnostics
-} // namespace emCore
+} // namespace emCore::diagnostics
+

@@ -13,6 +13,182 @@ except ImportError:
     print("ERROR: PyYAML not installed. Install with: pip install pyyaml")
     sys.exit(1)
 
+# -----------------------------
+# YAML validation
+# -----------------------------
+def _is_identifier(name: str) -> bool:
+    if not isinstance(name, str) or not name:
+        return False
+    if not (name[0].isalpha() or name[0] == '_'):
+        return False
+    for ch in name:
+        if not (ch.isalnum() or ch == '_' or ch == ':'):
+            return False
+    return True
+
+def validate_yaml(config: dict) -> None:
+    """Validate YAML schema for tasks, messages, channels, and messaging root.
+    Raises ValueError listing all issues if any are found."""
+    errors = []
+
+    # Sections
+    messages = config.get('messages', []) or []
+    channels = config.get('channels', []) or []
+    tasks = config.get('tasks', []) or []
+    messaging = config.get('messaging', {}) or {}
+
+    # Messages: uniqueness and identifier sanity
+    if not isinstance(messages, list):
+        errors.append("'messages' must be a list")
+        messages = []
+    msg_names = []
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            errors.append(f"messages[{idx}] must be a mapping")
+            continue
+        name = msg.get('name', '')
+        if not _is_identifier(name):
+            errors.append(f"messages[{idx}].name is missing or not a valid identifier: {name}")
+        elif name in msg_names:
+            errors.append(f"Duplicate message name: {name}")
+        else:
+            msg_names.append(name)
+        fields = msg.get('fields', []) or []
+        if not isinstance(fields, list):
+            errors.append(f"messages[{idx}].fields must be a list")
+        else:
+            for fidx, field in enumerate(fields):
+                if not isinstance(field, dict):
+                    errors.append(f"messages[{idx}].fields[{fidx}] must be a mapping")
+                    continue
+                fname = field.get('name', '')
+                ftype = field.get('type', '')
+                if not _is_identifier(fname):
+                    errors.append(f"messages[{idx}].fields[{fidx}].name invalid: {fname}")
+                if not _is_identifier(ftype):
+                    errors.append(f"messages[{idx}].fields[{fidx}].type invalid: {ftype}")
+
+    # Channels: uniqueness, required keys, and references
+    if not isinstance(channels, list):
+        errors.append("'channels' must be a list")
+        channels = []
+    ch_names = []
+    allowed_priorities = { 'idle','low','normal','high','critical' }
+    allowed_flags = { 'none','requires_ack','broadcast','urgent','persistent' }
+    allowed_ts = { 'producer','broker' }
+    allowed_overflow = { 'drop_oldest','reject' }
+    for idx, ch in enumerate(channels):
+        if not isinstance(ch, dict):
+            errors.append(f"channels[{idx}] must be a mapping")
+            continue
+        name = ch.get('name', '')
+        mtype = ch.get('message_type', '')
+        if not _is_identifier(name):
+            errors.append(f"channels[{idx}].name invalid: {name}")
+        elif name in ch_names:
+            errors.append(f"Duplicate channel name: {name}")
+        else:
+            ch_names.append(name)
+        if not _is_identifier(mtype):
+            errors.append(f"channels[{idx}].message_type invalid: {mtype}")
+        elif mtype not in msg_names:
+            errors.append(f"channels[{idx}].message_type '{mtype}' not found in messages list")
+        # numeric options
+        qsize = ch.get('queue_size', 16)
+        if not isinstance(qsize, int) or qsize <= 0:
+            errors.append(f"channels[{idx}].queue_size must be positive integer")
+        msubs = ch.get('max_subscribers', 8)
+        if not isinstance(msubs, int) or msubs <= 0:
+            errors.append(f"channels[{idx}].max_subscribers must be positive integer")
+        # defaults
+        prio = str(ch.get('default_priority','normal')).lower()
+        if prio not in allowed_priorities:
+            errors.append(f"channels[{idx}].default_priority invalid: {prio}")
+        flags = ch.get('default_flags', []) or []
+        if isinstance(flags, str):
+            flags = [flags]
+        if not isinstance(flags, list):
+            errors.append(f"channels[{idx}].default_flags must be list or string")
+        else:
+            for f in flags:
+                if str(f).lower() not in allowed_flags:
+                    errors.append(f"channels[{idx}].default_flags contains invalid flag: {f}")
+        ts = str(ch.get('timestamp_source','producer')).lower()
+        if ts not in allowed_ts:
+            errors.append(f"channels[{idx}].timestamp_source invalid: {ts}")
+        ofp = ch.get('overflow_policy', 'drop_oldest')
+        if ofp is not None and str(ofp).lower() not in allowed_overflow:
+            errors.append(f"channels[{idx}].overflow_policy invalid: {ofp}")
+
+    # Messaging root
+    if messaging:
+        if not isinstance(messaging, dict):
+            errors.append("'messaging' must be a mapping if provided")
+        else:
+            tpm = messaging.get('topic_queues_per_mailbox', None)
+            if tpm is not None and (not isinstance(tpm, int) or tpm <= 0):
+                errors.append("messaging.topic_queues_per_mailbox must be positive integer")
+            hrn = messaging.get('topic_high_ratio_num', None)
+            hrd = messaging.get('topic_high_ratio_den', None)
+            if hrd == 0:
+                errors.append("messaging.topic_high_ratio_den must be non-zero")
+            if hrn is not None and (not isinstance(hrn, int) or hrn < 0):
+                errors.append("messaging.topic_high_ratio_num must be non-negative integer")
+            if hrd is not None and (not isinstance(hrd, int) or hrd < 1):
+                errors.append("messaging.topic_high_ratio_den must be positive integer")
+            no = messaging.get('notify_on_empty_only', None)
+            if no is not None and not isinstance(no, bool):
+                errors.append("messaging.notify_on_empty_only must be boolean")
+
+    # Tasks
+    if not isinstance(tasks, list):
+        errors.append("'tasks' must be a list")
+        tasks = []
+    task_names = []
+    for idx, t in enumerate(tasks):
+        if not isinstance(t, dict):
+            errors.append(f"tasks[{idx}] must be a mapping")
+            continue
+        name = t.get('TaskName', t.get('name',''))
+        func = t.get('TaskEntryPtr', t.get('function',''))
+        if not _is_identifier(name):
+            errors.append(f"tasks[{idx}].name invalid: {name}")
+        elif name in task_names:
+            errors.append(f"Duplicate task name: {name}")
+        else:
+            task_names.append(name)
+        if not _is_identifier(func):
+            errors.append(f"tasks[{idx}].function invalid: {func}")
+        # Required watchdog fields (as enforced later)
+        if t.get('watchdog_timeout_ms', None) is None:
+            errors.append(f"tasks[{idx}] missing required 'watchdog_timeout_ms'")
+        if t.get('watchdog_action', None) is None:
+            errors.append(f"tasks[{idx}] missing required 'watchdog_action'")
+        # Subscriptions
+        subs = t.get('subscribes_to', []) or []
+        if not isinstance(subs, list):
+            errors.append(f"tasks[{idx}].subscribes_to must be a list")
+        else:
+            for sidx, sub in enumerate(subs):
+                if isinstance(sub, str):
+                    ch_name = sub
+                elif isinstance(sub, dict):
+                    ch_name = sub.get('channel','')
+                    md = sub.get('mailbox_depth', None)
+                    if md is not None and (not isinstance(md, int) or md <= 0):
+                        errors.append(f"tasks[{idx}].subscribes_to[{sidx}].mailbox_depth must be positive integer")
+                    ofp = sub.get('overflow_policy', None)
+                    if ofp is not None and str(ofp).lower() not in allowed_overflow:
+                        errors.append(f"tasks[{idx}].subscribes_to[{sidx}].overflow_policy invalid: {ofp}")
+                else:
+                    errors.append(f"tasks[{idx}].subscribes_to[{sidx}] must be string or mapping")
+                    continue
+                if ch_name not in ch_names:
+                    errors.append(f"tasks[{idx}].subscribes_to[{sidx}] references unknown channel: {ch_name}")
+
+    if errors:
+        raise ValueError("YAML validation failed:\n - " + "\n - ".join(errors))
+
 def priority_to_cpp(priority_str):
     """Convert priority string to C++ enum"""
     priority_map = {
@@ -30,7 +206,12 @@ def generate_message_types(messages):
         return ""
     
     message_code = []
+    # Ensure direct includes for types used later in generated helpers
     message_code.append("// Auto-generated message types")
+    message_code.append("#include <cstddef>")
+    message_code.append("#include <cstdint>")
+    message_code.append("#include <etl/algorithm.h>  // etl::copy_n")
+    message_code.append("#include <emCore/messaging/message_types.hpp>  // medium_message, priorities, flags")
     
     for msg in messages:
         name = msg.get('name', '')
@@ -54,7 +235,7 @@ struct {name} {{""")
     
     return '\n'.join(message_code)
 
-def generate_communication_setup(channels, tasks):
+def generate_communication_setup(channels, tasks, messaging_cfg):
     """Generate C++ communication setup code using YAML-aware broker system"""
     if not channels:
         return ""
@@ -99,16 +280,47 @@ def generate_communication_setup(channels, tasks):
         name = channel.get('name', '')
         msg_type = channel.get('message_type', '')
         topic_name = name.replace('_channel', '')
+        # Channel defaults
+        default_priority = channel.get('default_priority', 'normal')
+        priority_enum = {
+            'idle': 'emCore::messaging::message_priority::low',
+            'low': 'emCore::messaging::message_priority::low',
+            'normal': 'emCore::messaging::message_priority::normal',
+            'high': 'emCore::messaging::message_priority::high',
+            'critical': 'emCore::messaging::message_priority::critical'
+        }.get(str(default_priority).lower(), 'emCore::messaging::message_priority::normal')
+
+        flags_list = channel.get('default_flags', []) or []
+        if isinstance(flags_list, str):
+            flags_list = [flags_list]
+        flag_map = {
+            'none': 'emCore::messaging::message_flags::none',
+            'requires_ack': 'emCore::messaging::message_flags::requires_ack',
+            'broadcast': 'emCore::messaging::message_flags::broadcast',
+            'urgent': 'emCore::messaging::message_flags::urgent',
+            'persistent': 'emCore::messaging::message_flags::persistent',
+        }
+        flag_exprs = [flag_map.get(str(f).lower(), 'emCore::messaging::message_flags::none') for f in flags_list]
+        if not flag_exprs:
+            flags_expr = 'emCore::messaging::message_flags::none'
+        else:
+            flags_expr = ' | '.join(flag_exprs)
+
+        timestamp_source = str(channel.get('timestamp_source', 'producer')).lower()
         
         # Pack function
         comm_code.append(f"// Pack {msg_type} into medium_message for {name}")
         comm_code.append(f"inline void pack_{topic_name}_message(const {msg_type}& data, emCore::messaging::medium_message& msg) noexcept {{")
         comm_code.append(f"    msg.header.type = static_cast<emCore::u16>(yaml_topic::{topic_name});")
         comm_code.append(f"    msg.header.payload_size = sizeof({msg_type});")
-        comm_code.append(f"    msg.header.priority = static_cast<emCore::u8>(emCore::messaging::message_priority::normal);")
-        comm_code.append(f"    msg.header.flags = static_cast<emCore::u8>(emCore::messaging::message_flags::none);")
-        comm_code.append(f"    msg.header.timestamp = emCore::platform::get_system_time_us();")
-        comm_code.append(f"    etl::copy_n(reinterpret_cast<const uint8_t*>(&data), sizeof({msg_type}), msg.payload);")
+        comm_code.append(f"    msg.header.priority = static_cast<emCore::u8>({priority_enum});")
+        comm_code.append(f"    msg.header.flags = static_cast<emCore::u8>({flags_expr});")
+        if timestamp_source == 'broker':
+            comm_code.append(f"    msg.header.timestamp = 0;  // broker will stamp on publish")
+        else:
+            comm_code.append(f"    msg.header.timestamp = emCore::platform::get_system_time_us();")
+        # Avoid array-to-pointer decay by taking address of first element explicitly
+        comm_code.append(f"    etl::copy_n(reinterpret_cast<const uint8_t*>(&data), sizeof({msg_type}), &msg.payload[0]);")
         comm_code.append(f"}}")
         comm_code.append("")
         
@@ -118,7 +330,8 @@ def generate_communication_setup(channels, tasks):
         comm_code.append(f"    if (msg.header.type != static_cast<emCore::u16>(yaml_topic::{topic_name})) {{")
         comm_code.append(f"        return false;")
         comm_code.append(f"    }}")
-        comm_code.append(f"    etl::copy_n(msg.payload, sizeof({msg_type}), reinterpret_cast<uint8_t*>(&data));")
+        # Avoid array-to-pointer decay by taking address of first element explicitly
+        comm_code.append(f"    etl::copy_n(&msg.payload[0], sizeof({msg_type}), reinterpret_cast<uint8_t*>(&data));")
         comm_code.append(f"    return true;")
         comm_code.append(f"}}")
         comm_code.append("")
@@ -136,6 +349,11 @@ def generate_communication_setup(channels, tasks):
     # Map channel -> queue_size and max_subscribers for configuration
     channel_queue_size = { (ch.get('name','')): ch.get('queue_size', 16) for ch in channels }
     channel_max_subs = { (ch.get('name','')): ch.get('max_subscribers', 8) for ch in channels }
+
+    # Global broker policies
+    notify_only = bool(messaging_cfg.get('notify_on_empty_only', True))
+    comm_code.append(f"    // Broker notify policy from YAML")
+    comm_code.append(f"    task_mgr.set_notify_on_empty_only({str(notify_only).lower()});")
 
     # Configure per-topic capacities once (before per-task subscriptions)
     comm_code.append("    // Configure per-topic subscriber capacities from YAML")
@@ -165,15 +383,33 @@ def generate_communication_setup(channels, tasks):
         # Subscriptions
         if subscribes:
             comm_code.append(f"        // Subscriptions for {task_name}")
-            for channel_name in subscribes:
+            # Determine overflow policy per task from subscriptions (default drop_oldest)
+            task_drop_oldest = True
+            for sub in subscribes:
+                if isinstance(sub, dict):
+                    channel_name = sub.get('channel', '')
+                else:
+                    channel_name = sub
                 for channel in channels:
-                    if channel.get('name', '') == channel_name:
-                        topic_name = channel_name.replace('_channel', '')
+                    if channel.get('name','') == channel_name:
+                        topic_name = channel_name.replace('_channel','')
                         comm_code.append(f"        emCore::taskmaster::subscribe(emCore::topic_id_t(static_cast<emCore::u16>(yaml_topic::{topic_name})), task_id);")
-                        # Configure mailbox depth for this subscriber using channel queue_size
-                        qsize = channel_queue_size.get(channel_name, 16)
+                        # Mailbox depth: prefer explicit subscription override, fallback to channel queue_size
+                        q_override = 0
+                        if isinstance(sub, dict):
+                            q_override = int(sub.get('mailbox_depth', 0) or 0)
+                        qsize = q_override if q_override > 0 else channel_queue_size.get(channel_name, 16)
                         comm_code.append(f"        task_mgr.set_mailbox_depth(task_id, {int(qsize)});")
+                        # Overflow policy: subscription override > channel setting > default
+                        sub_policy = None
+                        if isinstance(sub, dict):
+                            sub_policy = sub.get('overflow_policy', None)
+                        ch_policy = channel.get('overflow_policy', None)
+                        policy = sub_policy if sub_policy is not None else ch_policy
+                        if isinstance(policy, str) and policy.lower() == 'reject':
+                            task_drop_oldest = False
                         break
+            comm_code.append(f"        task_mgr.set_overflow_policy(task_id, {str(task_drop_oldest).lower()});")
         
         # Watchdog setup with YAML attributes
         watchdog_action_enum = {
@@ -214,6 +450,8 @@ def generate_task_config_header(yaml_file, output_file):
     # Load YAML
     with open(yaml_file, 'r') as f:
         config = yaml.safe_load(f)
+    # Validate YAML schema and invariants
+    validate_yaml(config)
     
     tasks = config.get('tasks', [])
     messages = config.get('messages', [])
@@ -234,7 +472,8 @@ def generate_task_config_header(yaml_file, output_file):
     
     # Generate message types and communication setup
     message_types = generate_message_types(messages)
-    communication_setup = generate_communication_setup(channels, tasks)
+    messaging_root = config.get('messaging', {}) or {}
+    communication_setup = generate_communication_setup(channels, tasks, messaging_root)
     
     # Generate task configurations
     task_configs = []
@@ -373,18 +612,28 @@ def generate_task_config_header(yaml_file, output_file):
     messaging_cfg_path = generated_dir / "messaging_config.hpp"
     messaging_cfg = f"""
 #pragma once
-// Auto-generated from {{yaml_file}}
+// Auto-generated from {yaml_file}
 // Derived limits from YAML to override defaults in emCore::config
 #define EMCORE_MSG_QUEUE_CAPACITY {max_queue_size}
 #define EMCORE_MSG_MAX_TOPICS {topics_count}
 #define EMCORE_MSG_MAX_SUBS_PER_TOPIC {max_subscribers}
 """
+    # Optional overrides from messaging root (per-topic queues and high/normal split)
+    if isinstance(messaging_root, dict):
+        tpm = messaging_root.get('topic_queues_per_mailbox', None)
+        hrn = messaging_root.get('topic_high_ratio_num', None)
+        hrd = messaging_root.get('topic_high_ratio_den', None)
+        if isinstance(tpm, int) and tpm > 0:
+            messaging_cfg += f"#define EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX {int(tpm)}\n"
+        if isinstance(hrn, int) and hrn > 0:
+            messaging_cfg += f"#define EMCORE_MSG_TOPIC_HIGH_RATIO_NUM {int(hrn)}\n"
+        if isinstance(hrd, int) and hrd > 0:
+            messaging_cfg += f"#define EMCORE_MSG_TOPIC_HIGH_RATIO_DEN {int(hrd)}\n"
     # Format with actual yaml file name visible in header comment
     messaging_cfg = messaging_cfg.replace("{yaml_file}", str(Path(yaml_file).name))
     with open(messaging_cfg_path, 'w') as f:
-        f.write(messaging_cfg)
+        f.write(messaging_cfg + "\n")  # Add newline at end of file
 
-    print(f"Generated {output_file} with {len(tasks)} tasks")
     print(f"Generated {messaging_cfg_path} with YAML-derived messaging limits")
 
 def find_task_yaml():

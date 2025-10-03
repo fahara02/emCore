@@ -1,0 +1,93 @@
+#pragma once
+// Header-only runtime accessors for the packet pipeline singletons.
+// Keeps the system peripheral-agnostic and OS-agnostic.
+// No dynamic allocation, no RTTI. ETL only.
+
+#include <cstddef>
+#include <emCore/protocol/packet_parser.hpp>
+#include <emCore/protocol/packet_pipeline.hpp>
+#include <emCore/protocol/byte_ring.hpp>
+#include <emCore/protocol/decoder.hpp>
+#include <emCore/protocol/encoder.hpp>
+#include <emCore/protocol/command_dispatcher.hpp>
+
+// Include generated packet configuration if available
+#if __has_include("generated_packet_config.hpp")
+#  include "generated_packet_config.hpp"
+#elif __has_include(<emCore/generated/packet_config.hpp>)
+#  include <emCore/generated/packet_config.hpp>
+#else
+#error "Generated packet configuration not found. Run scripts/generate_packet_config.py"
+#endif
+
+// -------- Configurable capacities (compile-time) --------
+#ifndef EMCORE_PROTOCOL_PACKET_SIZE
+#define EMCORE_PROTOCOL_PACKET_SIZE 128
+#endif
+#ifndef EMCORE_PROTOCOL_MAX_HANDLERS
+#define EMCORE_PROTOCOL_MAX_HANDLERS 16
+#endif
+#ifndef EMCORE_PROTOCOL_RING_SIZE
+#define EMCORE_PROTOCOL_RING_SIZE 512
+#endif
+
+namespace emCore::protocol::runtime {
+
+// Prefer generated types from packet_config; sizes can still be overridden by macros
+using PacketT = emCore::protocol::gen::PacketT;
+using ParserT = emCore::protocol::gen::ParserT;
+using DispatcherT = emCore::protocol::command_dispatcher<EMCORE_PROTOCOL_MAX_HANDLERS, PacketT>;
+using FieldDecoderT = emCore::protocol::field_decoder<16>; // Max 16 fields per command
+using FieldEncoderT = emCore::protocol::field_encoder<16>; // Max 16 fields per command
+using RingT = emCore::protocol::byte_ring<EMCORE_PROTOCOL_RING_SIZE>;
+using PipelineT = emCore::protocol::packet_pipeline<RingT, ParserT, DispatcherT, PacketT>;
+
+inline RingT& get_ring() noexcept {
+    static RingT ring;
+    return ring;
+}
+
+inline ParserT& get_parser() noexcept {
+    static ParserT parser;
+    return parser;
+}
+
+inline DispatcherT& get_dispatcher() noexcept {
+    static DispatcherT dispatcher;
+    return dispatcher;
+}
+
+inline FieldDecoderT& get_field_decoder() noexcept {
+    static FieldDecoderT decoder;
+    return decoder;
+}
+
+inline FieldEncoderT& get_field_encoder() noexcept {
+    static FieldEncoderT encoder;
+    return encoder;
+}
+
+inline PipelineT& get_pipeline() noexcept {
+    static PipelineT pipeline(get_ring(), get_parser(), get_dispatcher());
+    return pipeline;
+}
+
+// Convenience processing helpers
+inline size_t process_available(size_t max_packets = static_cast<size_t>(-1)) noexcept {
+    return get_pipeline().process_available(max_packets);
+}
+
+inline size_t process_bytes(size_t max_bytes, size_t& packets_out) noexcept {
+    return get_pipeline().process_bytes(max_bytes, packets_out);
+}
+
+// Driver-friendly helpers to feed data into the pipeline
+inline bool feed_byte(u8 byte) noexcept {
+    return get_pipeline().feed_byte(byte);
+}
+
+inline size_t feed_bytes(const u8* data, size_t len) noexcept {
+    return get_pipeline().feed_bytes(data, len);
+}
+
+} // namespace emCore::protocol::runtime

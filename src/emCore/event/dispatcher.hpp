@@ -3,9 +3,11 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include <etl/vector.h>
+#include <etl/deque.h>
 #include <etl/queue.h>
 #include <etl/function.h>
 #include <etl/variant.h>
+#include <etl/array.h>
 
 namespace emCore {
     
@@ -70,7 +72,8 @@ namespace emCore {
     class event_dispatcher {
     private:
         etl::vector<event_handler_registration, config::max_event_handlers> handlers_;
-        etl::queue<event, config::event_queue_size> event_queue_;
+        using event_queue_container_t = etl::deque<event, config::event_queue_size>;
+        etl::queue<event, event_queue_container_t> event_queue_;
         bool initialized_;
         
         timestamp_t get_current_time() const noexcept;
