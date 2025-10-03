@@ -76,29 +76,8 @@ private:
     messaging::message_broker<medium_message, config::max_tasks> broker_;
     timestamp_t total_idle_time_{0};
     timestamp_t last_idle_time_{0};
-    
-    /* Broker stored separately to avoid large stack allocation during singleton init */
-    static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
-        static messaging::message_broker<medium_message, config::max_tasks> broker;
-        return broker;
-    }
-    
     taskmaster() = default;
     
-    [[nodiscard]] static timestamp_t get_current_time() noexcept {
-        return platform::get_system_time();
-    }
-    
-    task_control_block* find_task(task_id_t task_id) noexcept {
-        // O(1) lookup using task_id as direct index
-        if (task_id.value() >= tasks_.size()) {
-            return nullptr;
-        }
-        
-        // Verify the task at this index has the correct ID
-        auto& task = tasks_[task_id.value()];
-        return (task.id == task_id) ? &task : nullptr;
-    }
     
 public:
     ~taskmaster() = default;
@@ -244,45 +223,7 @@ public:
         return result<task_id_t, error_code>(tcb.id);
     }
 
-private:
-    /* Native task trampoline to enforce periodic scheduling and instrumentation */
-    static void native_task_trampoline(void* param) noexcept {
-        if (param == nullptr) {
-            return;
-        }
-        auto* tcb = static_cast<task_control_block*>(param);
-        auto& task_mgr = taskmaster::instance();
 
-        /* Ensure system init completed if used */
-        task_mgr.wait_until_ready();
-
-        const task_id_t tid = tcb->id;
-        auto* user_fn = tcb->function;
-        if (user_fn == nullptr) {
-            return;
-        }
-        /* Forward user parameter if provided; otherwise pass TCB pointer */
-        void* user_param = (tcb->parameters != nullptr) ? tcb->parameters : static_cast<void*>(tcb);
-
-        if (tcb->period_ms > 0) {
-            for (;;) {
-                emCore::task::get_global_scheduler().start_execution_timing(tid);
-                user_fn(user_param);
-                emCore::task::get_global_scheduler().end_execution_timing(tid);
-                emCore::get_global_watchdog().feed(tid);
-                emCore::task::get_global_scheduler().update_stack_usage(tid);
-                emCore::task::get_global_scheduler().adaptive_yield(tid);
-                emCore::platform::delay_ms(tcb->period_ms);
-            }
-        } else {
-            /* Non-periodic: call once; user may implement its own loop */
-            emCore::task::get_global_scheduler().start_execution_timing(tid);
-            user_fn(user_param);
-            emCore::task::get_global_scheduler().end_execution_timing(tid);
-            /* One-time feed to avoid early false positive */
-            emCore::get_global_watchdog().feed(tid);
-        }
-    }
     
     result<void, error_code> start_task(task_id_t task_id) noexcept {
         auto* task = find_task(task_id);
@@ -416,13 +357,7 @@ private:
         tasks_ready_ = true;
     }
     
-    /* Tasks call this to wait until initialization is complete */
-    void wait_until_ready() const noexcept {
-        while (!tasks_ready_) {
-            platform::delay_ms(10);
-        }
-    }
-    
+ 
     /* Get current task ID from native handle */
     [[nodiscard]] task_id_t get_current_task_id() const noexcept {
         auto* current_handle = platform::get_current_task_handle();
@@ -593,6 +528,80 @@ private:
     static result<void, error_code> set_notify_on_empty_only(bool enabled) noexcept {
         return get_broker().set_notify_on_empty_only(enabled);
     }
+
+
+    private:
+    /* Broker stored separately to avoid large stack allocation during singleton init */
+    static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
+        static messaging::message_broker<medium_message, config::max_tasks> broker;
+        return broker;
+    }
+
+   
+    
+    [[nodiscard]] static timestamp_t get_current_time() noexcept {
+        return platform::get_system_time();
+    }
+    
+    task_control_block* find_task(task_id_t task_id) noexcept {
+        // O(1) lookup using task_id as direct index
+        if (task_id.value() >= tasks_.size()) {
+            return nullptr;
+        }
+        
+        // Verify the task at this index has the correct ID
+        auto& task = tasks_[task_id.value()];
+        return (task.id == task_id) ? &task : nullptr;
+    }
+       /* Tasks call this to wait until initialization is complete */
+       void wait_until_ready() const noexcept {
+        while (!tasks_ready_) {
+            platform::delay_ms(10);
+        }
+    }
+    /* Native task trampoline to enforce periodic scheduling and instrumentation */
+    static void native_task_trampoline(void* param) noexcept {
+        if (param == nullptr) {
+            return;
+        }
+        auto* tcb = static_cast<task_control_block*>(param);
+        auto& task_mgr = taskmaster::instance();
+
+        /* Ensure system init completed if used */
+        task_mgr.wait_until_ready();
+
+        const task_id_t tid = tcb->id;
+        auto* user_fn = tcb->function;
+        if (user_fn == nullptr) {
+            return;
+        }
+        /* Forward user parameter if provided; otherwise pass TCB pointer */
+        void* user_param = (tcb->parameters != nullptr) ? tcb->parameters : static_cast<void*>(tcb);
+
+        if (tcb->period_ms > 0) {
+            for (;;) {
+                emCore::task::get_global_scheduler().start_execution_timing(tid);
+                user_fn(user_param);
+                emCore::task::get_global_scheduler().end_execution_timing(tid);
+                emCore::get_global_watchdog().feed(tid);
+                emCore::task::get_global_scheduler().update_stack_usage(tid);
+                emCore::task::get_global_scheduler().adaptive_yield(tid);
+                emCore::platform::delay_ms(tcb->period_ms);
+            }
+        } else {
+            /* Non-periodic: call once; user may implement its own loop */
+            emCore::task::get_global_scheduler().start_execution_timing(tid);
+            user_fn(user_param);
+            emCore::task::get_global_scheduler().end_execution_timing(tid);
+            /* One-time feed to avoid early false positive */
+            emCore::get_global_watchdog().feed(tid);
+        }
+    }
+
+
+
+
+
 };
 
 }  // namespace emCore
