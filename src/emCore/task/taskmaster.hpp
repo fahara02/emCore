@@ -494,7 +494,12 @@ public:
     result<MessageType, error_code> try_receive(task_id_t task_id) noexcept {
         return get_broker().try_receive(task_id.value());
     }
-    
+       /* Tasks call this to wait until initialization is complete */
+       void wait_until_ready() const noexcept {
+        while (!tasks_ready_) {
+            platform::delay_ms(10);
+        }
+    }
     /* Broadcast to all tasks */
     template<typename MessageType = medium_message>
     result<void, error_code> broadcast(const MessageType& msg) noexcept {
@@ -553,12 +558,7 @@ public:
         auto& task = tasks_[task_id.value()];
         return (task.id == task_id) ? &task : nullptr;
     }
-       /* Tasks call this to wait until initialization is complete */
-       void wait_until_ready() const noexcept {
-        while (!tasks_ready_) {
-            platform::delay_ms(10);
-        }
-    }
+    
     /* Native task trampoline to enforce periodic scheduling and instrumentation */
     static void native_task_trampoline(void* param) noexcept {
         if (param == nullptr) {
