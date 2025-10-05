@@ -13,6 +13,10 @@
 #include <etl/map.h>
 #include <etl/pool.h>
 #include <etl/array.h>
+#include <etl/memory.h>
+
+#include "../memory/pool.hpp"
+#include <utility>
 
 
 
@@ -25,6 +29,15 @@ class Ibroker {
 public:
     using message_type = MessageType;
     virtual ~Ibroker() = default;
+
+    // Non-copyable, non-movable interface
+    Ibroker(const Ibroker&) = delete;
+    Ibroker& operator=(const Ibroker&) = delete;
+    Ibroker(Ibroker&&) = delete;
+    Ibroker& operator=(Ibroker&&) = delete;
+
+protected:
+    Ibroker() = default;
 
     virtual result<void, error_code> subscribe(topic_id_t topic_id, task_id_t subscriber_task_id) noexcept = 0;
     virtual result<void, error_code> publish(u16 topic_id, MessageType& msg, task_id_t from_task_id) noexcept = 0;
@@ -504,6 +517,43 @@ public:
     }
 };
 
+/* Pool-backed unique_ptr utilities for broker and other messaging objects */
+template <typename T>
+struct pool_deleter {
+    emCore::memory_manager* manager{nullptr};
+    void operator()(T* ptr) const noexcept {
+        if (ptr != nullptr) {
+            ptr->~T();
+            if (manager != nullptr) {
+                (void)manager->deallocate(static_cast<void*>(ptr));
+            }
+        }
+    }
+};
+
+template <typename MessageT>
+using broker_uptr = etl::unique_ptr<Ibroker<MessageT>, pool_deleter<Ibroker<MessageT>>>;
+
+template <typename T, typename... Args>
+etl::unique_ptr<T, pool_deleter<T>> make_pool_unique(emCore::memory_manager& memory_mgr, Args&&... args) {
+    void* mem = memory_mgr.allocate(sizeof(T));
+    if (mem == nullptr) {
+        return etl::unique_ptr<T, pool_deleter<T>>{};
+    }
+    return etl::unique_ptr<T, pool_deleter<T>>(new (mem) T(std::forward<Args>(args)...), pool_deleter<T>{&memory_mgr});
+}
+
+/* Convenience factory: create a concrete message_broker but return as Ibroker unique_ptr */
+template <typename MessageType = medium_message, size_t MaxTasks = config::max_tasks, typename... Args>
+etl::unique_ptr<Ibroker<MessageType>, pool_deleter<Ibroker<MessageType>>>
+make_message_broker(emCore::memory_manager& memory_mgr, Args&&... args) {
+    using broker_t = message_broker<MessageType, MaxTasks>;
+    void* mem = memory_mgr.allocate(sizeof(broker_t));
+    if (mem == nullptr) {
+        return etl::unique_ptr<Ibroker<MessageType>, pool_deleter<Ibroker<MessageType>>>{};
+    }
+    return etl::unique_ptr<Ibroker<MessageType>, pool_deleter<Ibroker<MessageType>>>(new (mem) broker_t(std::forward<Args>(args)...), pool_deleter<Ibroker<MessageType>>{&memory_mgr});
+}
+
 
 }  // namespace emCore::messaging
-

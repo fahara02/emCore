@@ -2,6 +2,7 @@
 #include "../core/types.hpp"
 #include "message_types.hpp"
 #include "../platform/platform.hpp"
+#include <cstddef>
 // ---- Consolidated Zero-Copy Messaging Support ----
 namespace emCore::messaging {
 

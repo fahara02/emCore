@@ -21,8 +21,8 @@ class distributed_state {
 public:
     static_assert(sizeof(StateT) <= small_payload_size - 6, "StateT too large for small_message payload");
 
-    distributed_state(Ibroker<small_message>* broker, task_id_t self_task_id, const StateT& initial) noexcept
-        : broker_(broker), self_task_id_(self_task_id), state_(initial) {}
+    distributed_state(broker_uptr<small_message>& broker, task_id_t self_task_id, const StateT& initial) noexcept
+        : broker_(*broker), self_task_id_(self_task_id), state_(initial) {}
 
     // Start a new proposal; returns sequence (>0) or 0 if queue full
     u16 propose(const StateT& new_state) noexcept {
@@ -30,8 +30,8 @@ public:
         const u16 seq = static_cast<u16>(local_seq_++);
         pending_info info{}; info.state = new_state; info.acks = 1; (void)pending_.insert(typename pending_map::value_type(seq, info));
         small_message msg{}; msg.header.type = ProposeTopicId; msg.header.sender_id = self_task_id_.value(); msg.header.receiver_id = 0xFFFF; msg.header.sequence_number = seq;
-        msg.header.payload_size = encode_proposal_(msg.payload, seq, self_task_id_.value(), new_state); msg.header.timestamp = platform::get_system_time_us();
-        if (broker_ != nullptr) { (void)broker_->publish(ProposeTopicId, msg, self_task_id_); }
+        msg.header.payload_size = encode_proposal_(&msg.payload[0], seq, self_task_id_.value(), new_state); msg.header.timestamp = platform::get_system_time_us();
+        (void)broker_.publish(ProposeTopicId, msg, self_task_id_);
         return seq;
     }
 
@@ -61,7 +61,7 @@ private:
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     static bool decode_proposal_(const small_message& msg, u16& seq, u16& from, StateT& out_state) noexcept {
         if (msg.header.payload_size < (sizeof(StateT) + 4)) { return false; }
-        const u8* payload_ptr = reinterpret_cast<const u8*>(&msg.payload[0]);
+        const u8* payload_ptr = &msg.payload[0];
         seq = static_cast<u16>(payload_ptr[0] | (static_cast<u16>(payload_ptr[1]) << 8));
         from = static_cast<u16>(payload_ptr[2] | (static_cast<u16>(payload_ptr[3]) << 8));
         u8* dst_ptr = reinterpret_cast<u8*>(&out_state);
@@ -105,8 +105,8 @@ private:
         const bool accept = guard(state_, proposed);
         if (accept) {
             small_message ack{}; ack.header.type = AckTopicId; ack.header.sender_id = self_task_id_.value(); ack.header.receiver_id = from; ack.header.sequence_number = seq;
-            ack.header.payload_size = encode_ack_(ack.payload, seq, self_task_id_.value(), true); ack.header.timestamp = platform::get_system_time_us();
-            if (broker_ != nullptr) { (void)broker_->publish(AckTopicId, ack, self_task_id_); }
+            ack.header.payload_size = encode_ack_(&ack.payload[0], seq, self_task_id_.value(), true); ack.header.timestamp = platform::get_system_time_us();
+            (void)broker_.publish(AckTopicId, ack, self_task_id_);
         }
     }
 
@@ -114,14 +114,15 @@ private:
         u16 seq = 0; u16 from = 0; bool accept = false; (void)from;
         if (!decode_ack_(msg, seq, from, accept)) { return; }
         if (!accept) { return; }
-        auto it = pending_.find(seq); if (it == pending_.end()) { return; }
-        pending_info& info = it->second; ++info.acks; const u16 majority = static_cast<u16>((MaxPeers / 2) + 1);
+        auto iter = pending_.find(seq);
+        if (iter == pending_.end()) { return; }
+        pending_info& info = iter->second; ++info.acks; const u16 majority = static_cast<u16>((MaxPeers / 2) + 1);
         if (info.acks >= majority) {
             state_ = info.state;
             small_message commit{}; commit.header.type = CommitTopicId; commit.header.sender_id = self_task_id_.value(); commit.header.receiver_id = 0xFFFF; commit.header.sequence_number = seq;
-            commit.header.payload_size = encode_commit_(commit.payload, seq, state_); commit.header.timestamp = platform::get_system_time_us();
-            if (broker_ != nullptr) { (void)broker_->publish(CommitTopicId, commit, self_task_id_); }
-            pending_.erase(it);
+            commit.header.payload_size = encode_commit_(&commit.payload[0], seq, state_); commit.header.timestamp = platform::get_system_time_us();
+            (void)broker_.publish(CommitTopicId, commit, self_task_id_);
+            pending_.erase(iter);
         }
     }
 
@@ -129,7 +130,7 @@ private:
         u16 seq = 0; (void)seq; StateT committed{}; if (!decode_commit_(msg, seq, committed)) { return; } state_ = committed;
     }
 
-    Ibroker<small_message>* broker_;
+    Ibroker<small_message>& broker_;
     task_id_t self_task_id_;
     StateT state_;
     pending_map pending_{};

@@ -9,6 +9,7 @@
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
 #include "../messaging/message_types.hpp"
+#include "../memory/pool.hpp"
 #include "rtos_scheduler.hpp"
 #include "watchdog.hpp"
 
@@ -72,11 +73,20 @@ private:
     volatile bool tasks_ready_{false};  /* Flag to signal tasks can start */
     timestamp_t scheduler_start_time_{0};
     u32 total_context_switches_{0};
-    
-    messaging::message_broker<medium_message, config::max_tasks> broker_;
+    emCore::memory_manager memory_mgr_{};
+    etl::unique_ptr<messaging::message_broker<medium_message, config::max_tasks>,
+                    messaging::pool_deleter<messaging::message_broker<medium_message, config::max_tasks>>> broker_{};
     timestamp_t total_idle_time_{0};
     timestamp_t last_idle_time_{0};
-    taskmaster() = default;
+    taskmaster() noexcept
+        : tasks_()
+        , next_task_id_{invalid_task_id}
+        , initialized_{false}
+        , tasks_ready_{false}
+        , scheduler_start_time_{0}
+        , total_context_switches_{0}
+        , total_idle_time_{0}
+        , last_idle_time_{0} {}
     
     
 public:
@@ -103,6 +113,10 @@ public:
         total_context_switches_ = 0;
         total_idle_time_ = 0;
         last_idle_time_ = 0;
+        if (!broker_) {
+            broker_ = messaging::make_pool_unique<messaging::message_broker<medium_message, config::max_tasks>>(memory_mgr_);
+            if (!broker_) { return result<void, error_code>(error_code::out_of_memory); }
+        }
         initialized_ = true;
         
         return ok();
@@ -536,10 +550,13 @@ public:
 
 
     private:
-    /* Broker stored separately to avoid large stack allocation during singleton init */
+    /* Broker owned by taskmaster via pool-backed unique_ptr (lazy) */
     static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
-        static messaging::message_broker<medium_message, config::max_tasks> broker;
-        return broker;
+        auto& tm = taskmaster::instance();
+        if (!tm.broker_) {
+            tm.broker_ = messaging::make_pool_unique<messaging::message_broker<medium_message, config::max_tasks>>(tm.memory_mgr_);
+        }
+        return *tm.broker_;
     }
 
    

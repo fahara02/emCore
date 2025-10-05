@@ -7,7 +7,7 @@
 #include "../platform/platform.hpp"
 #include "message_types.hpp"
 #include "message_broker.hpp" // for Ibroker
-
+#include "../error/result.hpp"
 #include <etl/map.h>
 
 namespace emCore::messaging {
@@ -17,8 +17,8 @@ template <typename MsgType,
           size_t PendingLimit = config::default_qos_pending_limit>
 class qos_publisher {
 public:
-    qos_publisher(Ibroker<MsgType>* broker, task_id_t from_task_id, u16 ack_topic_id) noexcept
-        : broker_(broker), from_task_id_(from_task_id), ack_topic_id_(ack_topic_id) {}
+    qos_publisher(broker_uptr<MsgType>& broker, task_id_t from_task_id, u16 ack_topic_id) noexcept
+        : broker_(*broker), from_task_id_(from_task_id), ack_topic_id_(ack_topic_id) {}
 
     result<void, error_code> publish(u16 topic_id, MsgType& msg) noexcept {
         msg.header.flags = static_cast<u8>(static_cast<message_flags>(msg.header.flags) | message_flags::requires_ack);
@@ -37,8 +37,7 @@ public:
         if (!insert_result.second) {
             return result<void, error_code>(error_code::out_of_memory);
         }
-        if (broker_ == nullptr) { return result<void, error_code>(error_code::invalid_parameter); }
-        return broker_->publish(topic_id, msg, from_task_id_);
+        return broker_.publish(topic_id, msg, from_task_id_);
     }
 
     void pump_retransmit() noexcept {
@@ -48,7 +47,7 @@ public:
             if ((now - entry_ref.last_send) >= static_cast<timestamp_t>(config::default_ack_timeout_us)) {
                 entry_ref.last_send = now;
                 ++entry_ref.attempts;
-                if (broker_ != nullptr) { (void)broker_->publish(entry_ref.msg.header.type, entry_ref.msg, from_task_id_); }
+                (void)broker_.publish(entry_ref.msg.header.type, entry_ref.msg, from_task_id_);
             }
         }
     }
@@ -65,7 +64,7 @@ public:
         if (msg.header.type != ack_topic_id_) { return false; }
         if (msg.header.payload_size != sizeof(message_ack)) { return false; }
         message_ack ack{};
-        const u8* src_ptr = msg.payload;
+        const u8* src_ptr = &msg.payload[0];
         u8* dst_ptr = reinterpret_cast<u8*>(&ack);
         for (size_t i = 0; i < sizeof(message_ack); ++i) { *dst_ptr++ = *src_ptr++; }
         on_ack(ack);
@@ -77,7 +76,7 @@ private:
     using pending_map = etl::map<u16, pending_entry, PendingLimit>;
     u16 next_seq_() noexcept { return static_cast<u16>(local_seq_++); }
 
-    Ibroker<MsgType>* broker_;
+    Ibroker<MsgType>& broker_;
     task_id_t from_task_id_;
     u16 ack_topic_id_;
     pending_map pending_{};
@@ -89,22 +88,21 @@ template <typename MsgType,
           size_t TrackLimit = 32>
 class qos_subscriber {
 public:
-    qos_subscriber(Ibroker<MsgType>* broker, task_id_t self_task_id, u16 ack_topic_id) noexcept
-        : broker_(broker), self_task_id_(self_task_id), ack_topic_id_(ack_topic_id) {}
+    qos_subscriber(broker_uptr<MsgType>& broker, task_id_t self_task_id, u16 ack_topic_id) noexcept
+        : broker_(*broker), self_task_id_(self_task_id), ack_topic_id_(ack_topic_id) {}
 
     result<MsgType, error_code> receive(timeout_ms_t timeout) noexcept {
-        if (broker_ == nullptr) { return result<MsgType, error_code>(error_code::invalid_parameter); }
-        auto res = broker_->receive(self_task_id_, timeout);
+        auto res = broker_.receive(self_task_id_, timeout);
         if (!res.is_ok()) { return res; }
         MsgType msg = res.value();
 
         const u32 key = (static_cast<u32>(msg.header.sender_id) << 16) | static_cast<u32>(msg.header.type);
-        auto it = last_seq_.find(key);
+        auto iter = last_seq_.find(key);
         const u16 seq = msg.header.sequence_number;
-        if (it != last_seq_.end()) {
-            if (seq == it->second) { send_ack_(seq, msg.header.sender_id, true); return result<MsgType, error_code>(error_code::not_found); }
-            if (static_cast<i32>(seq) - static_cast<i32>(it->second) <= 0) { send_ack_(seq, msg.header.sender_id, true); return result<MsgType, error_code>(error_code::not_found); }
-            it->second = seq;
+        if (iter != last_seq_.end()) {
+            if (seq == iter->second) { send_ack_(seq, msg.header.sender_id, true); return result<MsgType, error_code>(error_code::not_found); }
+            if (static_cast<i32>(seq) - static_cast<i32>(iter->second) <= 0) { send_ack_(seq, msg.header.sender_id, true); return result<MsgType, error_code>(error_code::not_found); }
+            iter->second = seq;
         } else {
             if (last_seq_.size() < last_seq_.capacity()) { last_seq_.insert(typename seq_map::value_type(key, seq)); }
         }
@@ -127,11 +125,11 @@ private:
         if (sizeof(ack) <= sizeof(ack_msg.payload)) {
             const u8* src = reinterpret_cast<const u8*>(&ack);
             for (size_t i = 0; i < sizeof(ack); ++i) { ack_msg.payload[i] = src[i]; }
-            if (broker_ != nullptr) { (void)broker_->publish(ack_msg.header.type, ack_msg, self_task_id_); }
+            (void)broker_.publish(ack_msg.header.type, ack_msg, self_task_id_);
         }
     }
 
-    Ibroker<MsgType>* broker_;
+    Ibroker<MsgType>& broker_;
     task_id_t self_task_id_;
     u16 ack_topic_id_;
     seq_map last_seq_{};
