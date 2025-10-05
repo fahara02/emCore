@@ -15,18 +15,36 @@ Import("env")
 
 def ensure_pyyaml():
     """Ensure PyYAML is installed, install it if missing."""
+    print("🔍 emCore: Checking PyYAML availability...")
     try:
         import yaml
+        print("✅ emCore: PyYAML is already available")
         return True
     except ImportError:
-        print("📦 emCore: Installing PyYAML for code generation...")
+        print("📦 emCore: PyYAML not found, installing...")
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"], 
-                                capture_output=True, text=True)
-            print("✅ emCore: PyYAML installed successfully")
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"❌ emCore: Failed to install PyYAML: {e}")
+            print(f"🐍 emCore: Using Python interpreter: {sys.executable}")
+            result = subprocess.run([sys.executable, "-m", "pip", "install", "pyyaml"], 
+                                  capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                print("✅ emCore: PyYAML installed successfully")
+                # Try importing again to verify
+                try:
+                    import yaml
+                    print("✅ emCore: PyYAML import verified")
+                    return True
+                except ImportError:
+                    print("❌ emCore: PyYAML installed but import still fails")
+                    return False
+            else:
+                print(f"❌ emCore: pip install failed with return code {result.returncode}")
+                if result.stdout:
+                    print(f"STDOUT: {result.stdout}")
+                if result.stderr:
+                    print(f"STDERR: {result.stderr}")
+                return False
+        except subprocess.TimeoutExpired:
+            print("❌ emCore: PyYAML installation timed out")
             return False
         except Exception as e:
             print(f"❌ emCore: Unexpected error installing PyYAML: {e}")
@@ -273,8 +291,13 @@ if not hasattr(env, '_emcore_generators_run'):
     print("🔥 emCore: Running generators NOW...")
     
     # Ensure PyYAML is available before running generators
-    if not ensure_pyyaml():
+    print("🔧 emCore: Checking Python dependencies...")
+    pyyaml_ok = ensure_pyyaml()
+    if not pyyaml_ok:
         print("⚠️  emCore: PyYAML installation failed, generators may not work")
+        print("⚠️  emCore: Manual installation: pip install pyyaml")
+    else:
+        print("✅ emCore: Python dependencies ready")
     
     try:
         generate_tasks_if_needed()
