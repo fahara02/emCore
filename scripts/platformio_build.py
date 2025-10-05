@@ -13,6 +13,25 @@ from typing import Optional
 # Import PlatformIO build environment
 Import("env")
 
+def ensure_pyyaml():
+    """Ensure PyYAML is installed, install it if missing."""
+    try:
+        import yaml
+        return True
+    except ImportError:
+        print("📦 emCore: Installing PyYAML for code generation...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"], 
+                                capture_output=True, text=True)
+            print("✅ emCore: PyYAML installed successfully")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"❌ emCore: Failed to install PyYAML: {e}")
+            return False
+        except Exception as e:
+            print(f"❌ emCore: Unexpected error installing PyYAML: {e}")
+            return False
+
 print("🚀 emCore: Starting task generation check...")
 print("🔥 PLATFORMIO BUILD SCRIPT IS RUNNING!")
 print(f"🔥 PROJECT_DIR: {env.get('PROJECT_DIR')}")
@@ -252,6 +271,11 @@ def generate_command_if_needed():
 # Only run generators once, not on every script load
 if not hasattr(env, '_emcore_generators_run'):
     print("🔥 emCore: Running generators NOW...")
+    
+    # Ensure PyYAML is available before running generators
+    if not ensure_pyyaml():
+        print("⚠️  emCore: PyYAML installation failed, generators may not work")
+    
     try:
         generate_tasks_if_needed()
         generate_packet_if_needed()
