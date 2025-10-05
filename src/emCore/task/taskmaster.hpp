@@ -6,10 +6,10 @@
 #include "../core/config.hpp"
 #include "../error/result.hpp"
 #include "../platform/platform.hpp"
+#include <new>
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
 #include "../messaging/message_types.hpp"
-#include "../memory/pool.hpp"
 #include "rtos_scheduler.hpp"
 #include "watchdog.hpp"
 
@@ -73,9 +73,9 @@ private:
     volatile bool tasks_ready_{false};  /* Flag to signal tasks can start */
     timestamp_t scheduler_start_time_{0};
     u32 total_context_switches_{0};
-    emCore::memory_manager memory_mgr_{};
-    etl::unique_ptr<messaging::message_broker<medium_message, config::max_tasks>,
-                    messaging::pool_deleter<messaging::message_broker<medium_message, config::max_tasks>>> broker_{};
+    using broker_t = messaging::message_broker<medium_message, config::max_tasks>;
+    alignas(broker_t) unsigned char broker_storage_[sizeof(broker_t)]{};
+    etl::unique_ptr<broker_t, messaging::pool_deleter<broker_t>> broker_{};
     timestamp_t total_idle_time_{0};
     timestamp_t last_idle_time_{0};
     taskmaster() noexcept
@@ -86,7 +86,12 @@ private:
         , scheduler_start_time_{0}
         , total_context_switches_{0}
         , total_idle_time_{0}
-        , last_idle_time_{0} {}
+        , last_idle_time_{0}
+    {
+        /* Construct broker in-place in internal storage to avoid pool exhaustion */
+        auto* bptr = new (static_cast<void*>(broker_storage_)) broker_t();
+        broker_ = etl::unique_ptr<broker_t, messaging::pool_deleter<broker_t>>(bptr, messaging::pool_deleter<broker_t>{nullptr});
+    }
     
     
 public:
@@ -113,15 +118,11 @@ public:
         total_context_switches_ = 0;
         total_idle_time_ = 0;
         last_idle_time_ = 0;
-        if (!broker_) {
-            broker_ = messaging::make_pool_unique<messaging::message_broker<medium_message, config::max_tasks>>(memory_mgr_);
-            if (!broker_) { return result<void, error_code>(error_code::out_of_memory); }
-        }
         initialized_ = true;
         
         return ok();
     }
-    
+
     template<size_t N>
     result<void, error_code> create_all_tasks(const task_config (&config_table)[N]) noexcept {
         if (!initialized_) {
@@ -550,13 +551,9 @@ public:
 
 
     private:
-    /* Broker owned by taskmaster via pool-backed unique_ptr (lazy) */
+    /* Broker owned by taskmaster (constructed in ctor) */
     static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
-        auto& tm = taskmaster::instance();
-        if (!tm.broker_) {
-            tm.broker_ = messaging::make_pool_unique<messaging::message_broker<medium_message, config::max_tasks>>(tm.memory_mgr_);
-        }
-        return *tm.broker_;
+        return *(taskmaster::instance().broker_);
     }
 
    

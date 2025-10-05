@@ -36,7 +36,7 @@ public:
     Ibroker(Ibroker&&) = delete;
     Ibroker& operator=(Ibroker&&) = delete;
 
-protected:
+public:
     Ibroker() = default;
 
     virtual result<void, error_code> subscribe(topic_id_t topic_id, task_id_t subscriber_task_id) noexcept = 0;
