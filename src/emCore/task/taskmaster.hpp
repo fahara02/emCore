@@ -129,7 +129,7 @@ public:
                 task_id_t task_id = res.value();
                 auto* tcb = find_task(task_id);
                 if (tcb != nullptr) {
-                    get_broker().register_task(task_id.value(), tcb->native_handle);
+                    get_broker().register_task(task_id, tcb->native_handle);
                 }
             }
         }
@@ -268,7 +268,7 @@ public:
             
             auto* tcb = find_task(task_id);
             if (tcb != nullptr) {
-                get_broker().register_task(task_id.value(), tcb->native_handle);
+                get_broker().register_task(task_id, tcb->native_handle);
             }
         }
         return ok();
@@ -474,25 +474,25 @@ public:
     
     /* Subscribe task to a topic */
     static result<void, error_code> subscribe(topic_id_t topic_id, task_id_t task_id) noexcept {
-        return get_broker().subscribe(topic_id, task_id.value());
+        return get_broker().subscribe(topic_id, task_id);
     }
     
     /* Publish message to topic */
     template<typename MessageType = medium_message>
     result<void, error_code> publish(u16 topic_id, MessageType& msg, task_id_t from_task_id) noexcept {
-        return get_broker().publish(topic_id, msg, from_task_id.value());
+        return get_broker().publish(topic_id, msg, from_task_id);
     }
     
     /* Receive message (blocking) */
     template<typename MessageType = medium_message>
     result<MessageType, error_code> receive(task_id_t task_id, timeout_ms_t timeout = timeout_ms_t::infinite()) noexcept {
-        return get_broker().receive(task_id.value(), timeout);
+        return get_broker().receive(task_id, timeout);
     }
     
     /* Receive message (non-blocking) */
     template<typename MessageType = medium_message>
     result<MessageType, error_code> try_receive(task_id_t task_id) noexcept {
-        return get_broker().try_receive(task_id.value());
+        return get_broker().try_receive(task_id);
     }
        /* Tasks call this to wait until initialization is complete */
        void wait_until_ready() const noexcept {
@@ -516,7 +516,7 @@ public:
 
     /* Configure per-task mailbox depth (soft cap) */
     static result<void, error_code> set_mailbox_depth(task_id_t task_id, size_t depth) noexcept {
-        return get_broker().set_mailbox_depth(task_id.value(), depth);
+        return get_broker().set_mailbox_depth(task_id, depth);
     }
 
     /* Configure per-topic subscriber capacity (soft cap) */
@@ -526,7 +526,7 @@ public:
 
     /* Configure per-mailbox overflow policy (true = drop_oldest, false = reject new) */
     static result<void, error_code> set_overflow_policy(task_id_t task_id, bool drop_oldest) noexcept {
-        return get_broker().set_overflow_policy(task_id.value(), drop_oldest);
+        return get_broker().set_overflow_policy(task_id, drop_oldest);
     }
 
     /* Configure global notify policy (true = notify only on empty->non-empty) */
