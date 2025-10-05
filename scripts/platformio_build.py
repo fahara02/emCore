@@ -122,6 +122,10 @@ def generate_tasks_if_needed():
         print(f"🎯 Output: {generated_file}")
         
         # Explicitly pass YAML and output to ensure correct location
+        # Use the same Python environment and ensure PyYAML is available
+        env_vars = os.environ.copy()
+        env_vars['PYTHONPATH'] = os.pathsep.join([str(p) for p in sys.path])
+        
         result = subprocess.run([
             sys.executable, 
             str(generator_script),
@@ -131,7 +135,8 @@ def generate_tasks_if_needed():
         cwd=str(project_dir),
         capture_output=True, 
         text=True,
-        check=True
+        check=True,
+        env=env_vars
         )
         
         print("✅ emCore: Task configuration generated successfully!")
@@ -194,12 +199,16 @@ def generate_packet_if_needed():
         print(f"📝 Running packet generator: {generator_script}")
         print(f"📄 Packet file: {packet_yaml}")
         # Pass explicit output path to place header in userspace
+        # Use the same Python environment and ensure PyYAML is available
+        env_vars = os.environ.copy()
+        env_vars['PYTHONPATH'] = os.pathsep.join([str(p) for p in sys.path])
+        
         result = subprocess.run([
             sys.executable,
             str(generator_script),
             str(packet_yaml),
             str(generated_header)
-        ], cwd=str(project_dir), capture_output=True, text=True, check=True)
+        ], cwd=str(project_dir), capture_output=True, text=True, check=True, env=env_vars)
 
         print("✅ emCore: Packet configuration generated successfully!")
         if result.stdout.strip():
@@ -257,12 +266,16 @@ def generate_command_if_needed():
         print(f"📝 Running command generator: {generator_script}")
         print(f"📄 Command file: {commands_yaml}")
         # Pass explicit output path to place header in userspace
+        # Use the same Python environment and ensure PyYAML is available
+        env_vars = os.environ.copy()
+        env_vars['PYTHONPATH'] = os.pathsep.join([str(p) for p in sys.path])
+        
         result = subprocess.run([
             sys.executable,
             str(generator_script),
             str(commands_yaml),
             str(generated_header)
-        ], cwd=str(project_dir), capture_output=True, text=True, check=True)
+        ], cwd=str(project_dir), capture_output=True, text=True, check=True, env=env_vars)
 
         print("✅ emCore: Command table generated successfully!")
         if result.stdout.strip():
