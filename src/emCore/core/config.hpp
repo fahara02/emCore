@@ -65,6 +65,25 @@ namespace emCore::config {
         #else
         constexpr size_t default_topic_high_ratio_den = 4;
         #endif
+
+        // QoS / Delivery settings (overridable via build defines)
+        #ifdef EMCORE_MSG_QOS_PENDING_LIMIT
+        constexpr size_t default_qos_pending_limit = EMCORE_MSG_QOS_PENDING_LIMIT;
+        #else
+        constexpr size_t default_qos_pending_limit = 32;
+        #endif
+
+        #ifdef EMCORE_MSG_QOS_ACK_TIMEOUT_US
+        constexpr u32 default_ack_timeout_us = EMCORE_MSG_QOS_ACK_TIMEOUT_US;
+        #else
+        constexpr u32 default_ack_timeout_us = 500000; // 500 ms
+        #endif
+
+        #ifdef EMCORE_MSG_REPUBLISH_BUFFER
+        constexpr size_t default_republish_buffer = EMCORE_MSG_REPUBLISH_BUFFER;
+        #else
+        constexpr size_t default_republish_buffer = 16; // store copies for retry
+        #endif
         
         // Memory pool configuration
         constexpr size_t small_block_size = 32;

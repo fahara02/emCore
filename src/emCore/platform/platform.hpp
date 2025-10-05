@@ -88,9 +88,9 @@ inline timestamp_t get_system_time() noexcept {
     return get_system_time_us() / 1000;
 }
 
-// Global logging control - set to 0 to disable all platform logging
+// Global logging control - can be set via build flags
 #ifndef EMCORE_ENABLE_LOGGING
-#define EMCORE_ENABLE_LOGGING 0
+#define EMCORE_ENABLE_LOGGING 1  // Default enabled, disable via build flag
 #endif
 
 // Platform-specific logging function

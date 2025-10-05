@@ -1,14 +1,14 @@
 CompileFlags:
   Add:
-    - -std=gnu++17
+    - -std=gnu++20
     - -fno-rtti
     - -fno-exceptions
     - -Wall
     - -Wextra
     - -Wpedantic
     - -Isrc
+    - "-Iexternal/Embedded Template Library/include"
     - -Iexternal/etl/include
-    - -Iexternal/etl/src
     - -DETL_NO_STL
     - -DETL_NO_CHECKS
     - -DETL_NO_INITIALIZER_LIST

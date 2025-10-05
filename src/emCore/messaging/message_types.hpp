@@ -3,6 +3,8 @@
 #include <cstddef>
 
 #include "../core/types.hpp"
+#include "../platform/platform.hpp"
+#include <etl/array.h>
 
 
 namespace emCore::messaging {
@@ -80,4 +82,5 @@ struct message_ack {
 };
 
 }  // namespace emCore::messaging
+
 

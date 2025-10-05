@@ -12,17 +12,32 @@
 #include <etl/vector.h>
 #include <etl/map.h>
 #include <etl/pool.h>
+#include <etl/array.h>
 
 
 
 namespace emCore::messaging {
+
+// Lightweight broker interface to decouple advanced features from concrete broker.
+// Header-only, no dynamic allocation required. Virtuals are used without RTTI.
+template <typename MessageType>
+class Ibroker {
+public:
+    using message_type = MessageType;
+    virtual ~Ibroker() = default;
+
+    virtual result<void, error_code> subscribe(topic_id_t topic_id, task_id_t subscriber_task_id) noexcept = 0;
+    virtual result<void, error_code> publish(u16 topic_id, MessageType& msg, task_id_t from_task_id) noexcept = 0;
+    virtual result<MessageType, error_code> receive(task_id_t task_id, timeout_ms_t timeout) noexcept = 0;
+    virtual result<MessageType, error_code> try_receive(task_id_t task_id) noexcept = 0;
+};
 
 /**
  * @brief Professional message broker with pub/sub
  * Clean implementation that actually works
  */
 template<typename MessageType = medium_message, size_t MaxTasks = config::max_tasks>
-class message_broker {
+class message_broker : public Ibroker<MessageType> {
 private:
     static constexpr size_t queue_capacity = config::default_mailbox_queue_capacity;
     static constexpr size_t max_topics = config::default_max_topics;
@@ -30,7 +45,7 @@ private:
     
     /* Task mailbox with per-topic sub-queues (each with high/normal) */
     struct task_mailbox {
-        u16 task_id{0xFFFF};
+        task_id_t task_id{invalid_task_id};
         platform::task_handle_t handle{nullptr};
         mutable platform::critical_section critical_section;
         // Soft limit across all per-topic queues
@@ -219,7 +234,7 @@ private:
         u16 topic_id{0xFFFF};
         // Soft capacity limit for subscribers (<= max_subscribers_per_topic)
         u16 capacity_limit{static_cast<u16>(max_subscribers_per_topic)};
-        etl::vector<u16, max_subscribers_per_topic> subscriber_ids;
+        etl::vector<task_id_t, max_subscribers_per_topic> subscriber_ids;
         
         topic_subscription() = default;
         explicit topic_subscription(u16 topic_identifier) : topic_id(topic_identifier) {}
@@ -237,13 +252,13 @@ private:
     bool notify_on_empty_only_{true};
     
     /* Find mailbox by task ID - O(1) lookup */
-    task_mailbox* find_mailbox(u16 task_id) noexcept {
+    task_mailbox* find_mailbox(task_id_t task_id) noexcept {
         // Direct indexing since task_id maps to mailbox index
-        if (task_id >= mailboxes_.size()) {
+        const size_t idx = static_cast<size_t>(task_id.value());
+        if (idx >= mailboxes_.size()) {
             return nullptr;
         }
-        
-        auto& mailbox = mailboxes_[task_id];
+        auto& mailbox = mailboxes_[idx];
         return (mailbox.task_id == task_id) ? &mailbox : nullptr;
     }
     
@@ -266,7 +281,7 @@ public:
     
     /* Configure per-mailbox depth limit (soft cap <= queue_capacity) */
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    result<void, error_code> set_mailbox_depth(u16 task_id, size_t depth) noexcept {
+    result<void, error_code> set_mailbox_depth(task_id_t task_id, size_t depth) noexcept {
         task_mailbox* mailbox = find_mailbox(task_id);
         if (mailbox == nullptr) {
             return result<void, error_code>(error_code::not_found);
@@ -277,16 +292,17 @@ public:
     }
 
     /* Register task with mailbox */
-    result<void, error_code> register_task(u16 task_id, platform::task_handle_t handle = nullptr) noexcept {
+    result<void, error_code> register_task(task_id_t task_id, platform::task_handle_t handle = nullptr) noexcept {
         // Ensure vector index equals task_id for O(1) lookup in find_mailbox()
-        if (task_id >= MaxTasks) {
+        const size_t idx = static_cast<size_t>(task_id.value());
+        if (idx >= MaxTasks) {
             return result<void, error_code>(error_code::out_of_memory);
         }
 
         // Expand vector up to task_id + 1, initializing default mailboxes
-        if (mailboxes_.size() <= task_id) {
+        if (mailboxes_.size() <= idx) {
             const size_t prev_size = mailboxes_.size();
-            const size_t new_size = static_cast<size_t>(task_id) + 1U;
+            const size_t new_size = idx + 1U;
             // Check capacity before resize
             if (new_size > mailboxes_.capacity()) {
                 return result<void, error_code>(error_code::out_of_memory);
@@ -294,25 +310,25 @@ public:
             mailboxes_.resize(new_size);
             // Initialize any newly created slots to empty task_id
             for (size_t i = prev_size; i < new_size; ++i) {
-                mailboxes_[i].task_id = 0xFFFF;
+                mailboxes_[i].task_id = invalid_task_id;
                 mailboxes_[i].handle = nullptr;
             }
         }
 
         // If already registered at correct index, just update handle
-        if (mailboxes_[task_id].task_id == task_id) {
-            mailboxes_[task_id].handle = handle;
+        if (mailboxes_[idx].task_id == task_id) {
+            mailboxes_[idx].handle = handle;
             return ok();
         }
 
         // Register mailbox at index == task_id
-        mailboxes_[task_id].task_id = task_id;
-        mailboxes_[task_id].handle = handle;
+        mailboxes_[idx].task_id = task_id;
+        mailboxes_[idx].handle = handle;
         return ok();
     }
 
     /* Configure per-mailbox overflow policy */
-    result<void, error_code> set_overflow_policy(u16 task_id, bool drop_oldest) noexcept {
+    result<void, error_code> set_overflow_policy(task_id_t task_id, bool drop_oldest) noexcept {
         task_mailbox* mailbox = find_mailbox(task_id);
         if (mailbox == nullptr) {
             return result<void, error_code>(error_code::not_found);
@@ -324,7 +340,7 @@ public:
     /* Configure global notify policy for all mailboxes */
     result<void, error_code> set_notify_on_empty_only(bool enabled) noexcept {
         for (auto& mailbox : mailboxes_) {
-            if (mailbox.task_id != 0xFFFF) {
+            if (mailbox.task_id != invalid_task_id) {
                 mailbox.notify_on_empty_only = enabled;
             }
         }
@@ -332,8 +348,8 @@ public:
     }
     
     /* Subscribe task to topic */
-    result<void, error_code> subscribe(topic_id_t topic_id, u16 subscriber_task_id) noexcept {
-        u16 task_id = subscriber_task_id;
+    result<void, error_code> subscribe(topic_id_t topic_id, task_id_t subscriber_task_id) noexcept override {
+        task_id_t task_id = subscriber_task_id;
         /* Find or create topic */
         topic_subscription* topic = find_topic(topic_id.value);
         if (topic == nullptr) {
@@ -354,7 +370,7 @@ public:
         }
         
         /* Check if already subscribed */
-        for (u16 subscriber_id : topic->subscriber_ids) {
+        for (task_id_t subscriber_id : topic->subscriber_ids) {
             if (subscriber_id == task_id) {
                 return ok();
             }
@@ -365,13 +381,15 @@ public:
     }
     
     /* Publish message to topic */
-    result<void, error_code> publish(u16 topic_id, MessageType& msg, u16 from_task_id) noexcept {
-        msg.header.sender_id = from_task_id;
+    result<void, error_code> publish(u16 topic_id, MessageType& msg, task_id_t from_task_id) noexcept override {
+        msg.header.sender_id = from_task_id.value();
         // Only set timestamp if producer hasn't set it (allows end-to-end latency measurement)
         if (msg.header.timestamp == 0) {
             msg.header.timestamp = platform::get_system_time_us();
         }
-        msg.header.sequence_number = sequence_++;
+        if (msg.header.sequence_number == 0) {
+            msg.header.sequence_number = sequence_++;
+        }
         msg.header.type = topic_id;
         
         topic_subscription* topic = find_topic(topic_id);
@@ -381,7 +399,7 @@ public:
         
         /* Send to all subscribers */
         bool sent_any = false;
-        for (u16 subscriber_id : topic->subscriber_ids) {
+        for (task_id_t subscriber_id : topic->subscriber_ids) {
             task_mailbox* mailbox = find_mailbox(subscriber_id);
             if (mailbox != nullptr) {
                 auto send_result = mailbox->send(msg);
@@ -398,7 +416,7 @@ public:
     }
     
     /* Receive message (blocking) */
-    result<MessageType, error_code> receive(u16 task_id, timeout_ms_t timeout = timeout_ms_t::infinite()) noexcept {
+    result<MessageType, error_code> receive(task_id_t task_id, timeout_ms_t timeout) noexcept override {
         u32 timeout_ms = timeout.value;
         task_mailbox* mailbox = find_mailbox(task_id);
         if (mailbox == nullptr) {
@@ -426,7 +444,7 @@ public:
     }
     
     /* Try receive (non-blocking) */
-    result<MessageType, error_code> try_receive(u16 task_id) noexcept {
+    result<MessageType, error_code> try_receive(task_id_t task_id) noexcept override {
         task_mailbox* mailbox = find_mailbox(task_id);
         if (mailbox == nullptr) {
             return result<MessageType, error_code>(error_code::not_found);
@@ -446,7 +464,7 @@ public:
         /* Send to all subscribers */
         bool sent_any = false;
         for (auto& mailbox : mailboxes_) {
-            if (mailbox.task_id != 0xFFFF) {
+            if (mailbox.task_id != invalid_task_id) {
                 auto send_result = mailbox.send(msg);
                 if (send_result.is_ok()) {
                     sent_count_++;
@@ -485,6 +503,7 @@ public:
         return ok();
     }
 };
+
 
 }  // namespace emCore::messaging
 
