@@ -13,21 +13,6 @@
 
 namespace emCore::protocol {
 
-// Allow projects to configure opcode space size at compile time.
-// Prefer the generated value if available, otherwise fallback to 256.
-#ifndef EMCORE_PROTOCOL_OPCODE_SPACE
-#  if defined(__has_include)
-#    if __has_include(<generated_packet_config.hpp>)
-#      include <generated_packet_config.hpp>
-#      define EMCORE_PROTOCOL_OPCODE_SPACE ::emCore::protocol::gen::OPCODE_SPACE
-#    else
-#      define EMCORE_PROTOCOL_OPCODE_SPACE 256
-#    endif
-#  else
-#    define EMCORE_PROTOCOL_OPCODE_SPACE 256
-#  endif
-#endif
-
 // Encoder state machine states
 enum class encode_state : u8 {
     ENCODE_SYNC = 0,
@@ -42,7 +27,7 @@ enum class encode_state : u8 {
 
 // Field encoder state machine for automatic structured data serialization
 // MaxFields defines max fields per opcode layout
-template <size_t MaxFields, size_t OpcodeSpace = EMCORE_PROTOCOL_OPCODE_SPACE>
+template <size_t MaxFields, size_t OpcodeSpace = 256>
 class field_encoder {
 public:
     field_encoder() = default;

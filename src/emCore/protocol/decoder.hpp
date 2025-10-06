@@ -17,21 +17,6 @@ namespace emCore::protocol {
 
 namespace emCore::protocol {
 
-// Allow projects to configure opcode space size at compile time.
-// Prefer the generated value if available, otherwise fallback to 256.
-#ifndef EMCORE_PROTOCOL_OPCODE_SPACE
-#  if defined(__has_include)
-#    if __has_include(<generated_packet_config.hpp>)
-#      include <generated_packet_config.hpp>
-#      define EMCORE_PROTOCOL_OPCODE_SPACE ::emCore::protocol::gen::OPCODE_SPACE
-#    else
-#      define EMCORE_PROTOCOL_OPCODE_SPACE 256
-#    endif
-#  else
-#    define EMCORE_PROTOCOL_OPCODE_SPACE 256
-#  endif
-#endif
-
 // Field type definitions
 enum class FieldType : u8 {
     U8 = 0,
@@ -63,7 +48,7 @@ enum class FieldDecodeState : u8 {
 };
 
 // Field decoder state machine for automatic structured data parsing
-template <size_t MaxFields, size_t OpcodeSpace = EMCORE_PROTOCOL_OPCODE_SPACE>
+template <size_t MaxFields, size_t OpcodeSpace = 256>
 class field_decoder {
 public:
     field_decoder() = default;

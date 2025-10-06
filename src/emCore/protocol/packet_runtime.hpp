@@ -12,8 +12,8 @@
 #include <emCore/protocol/command_dispatcher.hpp>
 
 // Include generated packet configuration if available
-#if __has_include("generated_packet_config.hpp")
-#  include "generated_packet_config.hpp"
+#if __has_include(<generated_packet_config.hpp>)
+#  include <generated_packet_config.hpp>
 #elif __has_include(<emCore/generated/packet_config.hpp>)
 #  include <emCore/generated/packet_config.hpp>
 #else
@@ -33,12 +33,14 @@
 
 namespace emCore::protocol::runtime {
 
+namespace gencfg = ::emCore::protocol::gen;
+
 // Prefer generated types from packet_config; sizes can still be overridden by macros
-using PacketT = emCore::protocol::gen::PacketT;
-using ParserT = emCore::protocol::gen::ParserT;
+using PacketT = gencfg::PacketT;
+using ParserT = gencfg::ParserT;
 using DispatcherT = emCore::protocol::command_dispatcher<EMCORE_PROTOCOL_MAX_HANDLERS, PacketT>;
-using FieldDecoderT = emCore::protocol::field_decoder<16>; // Max 16 fields per command
-using FieldEncoderT = emCore::protocol::field_encoder<16>; // Max 16 fields per command
+using FieldDecoderT = emCore::protocol::field_decoder<16, gencfg::OPCODE_SPACE>; // Max 16 fields per command
+using FieldEncoderT = emCore::protocol::field_encoder<16, gencfg::OPCODE_SPACE>; // Max 16 fields per command
 using RingT = emCore::protocol::byte_ring<EMCORE_PROTOCOL_RING_SIZE>;
 using PipelineT = emCore::protocol::packet_pipeline<RingT, ParserT, DispatcherT, PacketT>;
 
