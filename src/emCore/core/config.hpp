@@ -15,7 +15,7 @@
 #define EMCORE_ENABLE_ZC 1
 #endif
 #ifndef EMCORE_ENABLE_EVENT_LOGS
-#define EMCORE_ENABLE_EVENT_LOGS 1
+#define EMCORE_ENABLE_EVENT_LOGS 0
 #endif
 
 // If available, include generated messaging configuration macros produced from YAML.
