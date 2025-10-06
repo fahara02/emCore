@@ -153,9 +153,22 @@ def generate_packet_header(cfg: dict, out_path: Path):
     header.append("")
     header.append("#endif // EMCORE_GENERATED_PACKET_CONFIG_HPP")
 
+    text = "\n".join(header) + "\n"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, 'w') as f:
-        f.write("\n".join(header) + "\n")
+        f.write(text)
+
+    # Also write a copy into the PlatformIO project's include/ so libraries can include it
+    try:
+        if out_path.parent.name == 'src':
+            include_dir = out_path.parent.parent / 'include'
+            include_dir.mkdir(parents=True, exist_ok=True)
+            include_path = include_dir / out_path.name
+            with open(include_path, 'w') as f:
+                f.write(text)
+    except Exception:
+        # Non-fatal: best effort mirroring
+        pass
 
 
 def main():

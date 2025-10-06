@@ -584,6 +584,20 @@ def generate_task_config_header(yaml_file, output_file):
     with open(output_file, 'w') as f:
         f.write(header)
 
+    # Also mirror into project's include/ so that libraries can include it
+    try:
+        out_path = Path(output_file)
+        # Mirror only when placed under a typical userspace src/ tree
+        if out_path.parent.name == 'src':
+            include_dir = out_path.parent.parent / 'include'
+            include_dir.mkdir(parents=True, exist_ok=True)
+            include_path = include_dir / out_path.name
+            with open(include_path, 'w') as f:
+                f.write(header)
+    except Exception:
+        # Best-effort; non-fatal if mirroring fails
+        pass
+
     # Derive messaging limits from YAML to allow config overrides (opt-in generation)
     # Enable by setting environment variable: EMCORE_GENERATE_MESSAGING_CONFIG=1
     emit_msg_cfg = os.getenv("EMCORE_GENERATE_MESSAGING_CONFIG", "0") == "1"
