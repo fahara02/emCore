@@ -78,7 +78,7 @@ def generate_tasks_if_needed():
     
     # Look for tasks.yaml in user's project root or test/
     tasks_yaml = project_dir / "tasks.yaml"
-    generated_file = project_dir / "src" / "generated_tasks.hpp"
+    generated_file = project_dir / "include" / "generated_tasks.hpp"
     if not tasks_yaml.exists():
         alt = project_dir / "test" / "tasks.yaml"
         if alt.exists():
@@ -190,7 +190,7 @@ def generate_packet_if_needed():
         return
 
     # Expected output in USER PROJECT SPACE
-    generated_header = project_dir / "src" / "generated_packet_config.hpp"
+    generated_header = project_dir / "include" / "generated_packet_config.hpp"
 
     print("=" * 60)
     print("🚀 emCore: GENERATING PACKET CONFIGURATION...")
@@ -257,7 +257,7 @@ def generate_command_if_needed():
         return
 
     # Expected output in USER PROJECT SPACE
-    generated_header = project_dir / "src" / "generated_command_table.hpp"
+    generated_header = project_dir / "include" / "generated_command_table.hpp"
 
     print("=" * 60)
     print("🚀 emCore: GENERATING COMMAND TABLE...")
