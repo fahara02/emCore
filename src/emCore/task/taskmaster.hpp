@@ -86,9 +86,17 @@ private:
     alignas(small_broker_t) unsigned char small_broker_storage_[sizeof(small_broker_t)]{};
     etl::unique_ptr<small_broker_t, messaging::pool_deleter<small_broker_t>> small_broker_{};
 
-    // Zero-copy pool and broker (defaults: 64 bytes x 16 blocks)
-    static constexpr size_t zc_block_size_ = 64;
-    static constexpr size_t zc_block_count_ = 16;
+    // Zero-copy pool and broker (tunable via build defines; conservative defaults)
+    #ifdef EMCORE_ZC_BLOCK_SIZE
+    static constexpr size_t zc_block_size_ = EMCORE_ZC_BLOCK_SIZE;
+    #else
+    static constexpr size_t zc_block_size_ = 32; // reduce DRAM usage
+    #endif
+    #ifdef EMCORE_ZC_BLOCK_COUNT
+    static constexpr size_t zc_block_count_ = EMCORE_ZC_BLOCK_COUNT;
+    #else
+    static constexpr size_t zc_block_count_ = 8;  // reduce DRAM usage
+    #endif
     using zc_pool_t = messaging::zero_copy_pool<zc_block_size_, zc_block_count_>;
     using zc_msg_t  = messaging::zc_message_envelope<zc_pool_t>;
     using zc_broker_t = messaging::message_broker<zc_msg_t, config::max_tasks>;
@@ -98,10 +106,26 @@ private:
     alignas(zc_broker_t) unsigned char zc_broker_storage_[sizeof(zc_broker_t)]{};
     etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>> zc_broker_{};
 
-    // Event logs
-    using med_log_t   = messaging::event_log<medium_message, 128, true>;
-    using small_log_t = messaging::event_log<small_message, 128, true>;
-    using zc_log_t    = messaging::event_log<zc_msg_t, 64, true>;
+    // Event logs (tunable via build defines; conservative defaults)
+    #ifdef EMCORE_EVENT_LOG_MED_CAP
+    static constexpr size_t evlog_med_cap_ = EMCORE_EVENT_LOG_MED_CAP;
+    #else
+    static constexpr size_t evlog_med_cap_ = 16;  // was 128
+    #endif
+    #ifdef EMCORE_EVENT_LOG_SML_CAP
+    static constexpr size_t evlog_sml_cap_ = EMCORE_EVENT_LOG_SML_CAP;
+    #else
+    static constexpr size_t evlog_sml_cap_ = 16;  // was 128
+    #endif
+    #ifdef EMCORE_EVENT_LOG_ZC_CAP
+    static constexpr size_t evlog_zc_cap_ = EMCORE_EVENT_LOG_ZC_CAP;
+    #else
+    static constexpr size_t evlog_zc_cap_ = 8;    // was 64
+    #endif
+
+    using med_log_t   = messaging::event_log<medium_message, evlog_med_cap_, true>;
+    using small_log_t = messaging::event_log<small_message, evlog_sml_cap_, true>;
+    using zc_log_t    = messaging::event_log<zc_msg_t,    evlog_zc_cap_,  true>;
     alignas(med_log_t)   unsigned char med_log_storage_[sizeof(med_log_t)]{};
     alignas(small_log_t) unsigned char small_log_storage_[sizeof(small_log_t)]{};
     alignas(zc_log_t)    unsigned char zc_log_storage_[sizeof(zc_log_t)]{};
