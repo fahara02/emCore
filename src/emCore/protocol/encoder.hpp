@@ -38,7 +38,7 @@ public:
         auto& layout_entry = layouts_[opcode];
         layout_entry.field_count = field_count;
         for (size_t i = 0; i < field_count; ++i) {
-            layout_entry.fields[i] = fields[i];
+            layout_entry.fields[i] = field_desc{fields[i].type, fields[i].offset};
         }
         return true;
     }
@@ -196,8 +196,14 @@ public:
     }
 
 private:
+    // Compact field descriptor used at runtime (no debug name pointer)
+    struct field_desc {
+        FieldType type;
+        size_t offset;
+    };
+
     struct field_layout {
-        etl::array<field_def, MaxFields> fields{};
+        etl::array<field_desc, MaxFields> fields{};
         size_t field_count{0};
     };
 

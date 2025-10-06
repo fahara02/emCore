@@ -293,11 +293,14 @@ inline bool create_native_task(const task_create_params& params) noexcept {
     #if defined(ARDUINO) && (defined(ESP32) || defined(ESP_PLATFORM))
         /* ESP32-Arduino: Create FreeRTOS task */
         BaseType_t result;
+        // Convert stack size from bytes (API) to words (FreeRTOS expects words)
+        uint32_t depth_words = static_cast<uint32_t>(params.stack_size / sizeof(StackType_t));
+        if (depth_words == 0) { depth_words = 1; }
         if (params.pin_to_core && params.core_id >= 0) {
             result = xTaskCreatePinnedToCore(
                 params.function,
                 params.name,
-                params.stack_size,
+                depth_words,
                 params.parameters,
                 params.priority,
                 reinterpret_cast<TaskHandle_t*>(params.handle),
@@ -307,7 +310,7 @@ inline bool create_native_task(const task_create_params& params) noexcept {
             result = xTaskCreate(
                 params.function,
                 params.name,
-                params.stack_size,
+                depth_words,
                 params.parameters,
                 params.priority,
                 reinterpret_cast<TaskHandle_t*>(params.handle)
@@ -321,11 +324,14 @@ inline bool create_native_task(const task_create_params& params) noexcept {
     #elif defined(EMCORE_PLATFORM_ESP32)
         /* ESP-IDF native: Create FreeRTOS task */
         BaseType_t result;
+        // Convert stack size from bytes (API) to words (FreeRTOS expects words)
+        uint32_t depth_words = static_cast<uint32_t>(params.stack_size / sizeof(StackType_t));
+        if (depth_words == 0) { depth_words = 1; }
         if (params.pin_to_core && params.core_id >= 0) {
             result = xTaskCreatePinnedToCore(
                 params.function,
                 params.name,
-                params.stack_size,
+                depth_words,
                 params.parameters,
                 params.priority,
                 reinterpret_cast<TaskHandle_t*>(params.handle),
@@ -335,7 +341,7 @@ inline bool create_native_task(const task_create_params& params) noexcept {
             result = xTaskCreate(
                 params.function,
                 params.name,
-                params.stack_size,
+                depth_words,
                 params.parameters,
                 params.priority,
                 reinterpret_cast<TaskHandle_t*>(params.handle)

@@ -32,6 +32,12 @@ struct field_def {
     const char* name;   // Field name for debugging
 };
 
+// Compact field descriptor stored in runtime layouts (no name pointer)
+struct field_desc {
+    FieldType type;
+    size_t offset;
+};
+
 // Field decoding states for structured data parsing
 enum class FieldDecodeState : u8 {
     FIELD_START = 0,
@@ -61,7 +67,7 @@ public:
         
         layouts_[opcode].field_count = field_count;
         for (size_t i = 0; i < field_count; ++i) {
-            layouts_[opcode].fields[i] = fields[i];
+            layouts_[opcode].fields[i] = field_desc{fields[i].type, fields[i].offset};
         }
         return true;
     }
@@ -89,14 +95,14 @@ public:
     
 private:
     struct field_layout {
-        etl::array<field_def, MaxFields> fields{};
+        etl::array<field_desc, MaxFields> fields{};
         size_t field_count{0};
     };
     
     etl::array<field_layout, OpcodeSpace> layouts_{}; // One layout per opcode
     
     bool decode_single_field(const u8* data, u16 data_len, size_t& offset, 
-                            const field_def& field, u8* target) noexcept {
+                            const field_desc& field, u8* target) noexcept {
         u8* field_ptr = target + field.offset;
         
         switch (field.type) {
