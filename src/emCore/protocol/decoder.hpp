@@ -22,14 +22,6 @@ namespace emCore::protocol {
 #define EMCORE_PROTOCOL_OPCODE_SPACE 256
 #endif
 
-// Parser error codes
-enum class parser_error : u8 {
-    none = 0,
-    boundary_error,
-    length_overflow,
-    checksum_mismatch,
-};
-
 // Field type definitions
 enum class FieldType : u8 {
     U8 = 0,
