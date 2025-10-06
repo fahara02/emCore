@@ -13,6 +13,11 @@
 
 namespace emCore::protocol {
 
+// Allow projects to configure opcode space size at compile time
+#ifndef EMCORE_PROTOCOL_OPCODE_SPACE
+#define EMCORE_PROTOCOL_OPCODE_SPACE 256
+#endif
+
 // Encoder state machine states
 enum class encode_state : u8 {
     ENCODE_SYNC = 0,
@@ -27,7 +32,7 @@ enum class encode_state : u8 {
 
 // Field encoder state machine for automatic structured data serialization
 // MaxFields defines max fields per opcode layout
-template <size_t MaxFields>
+template <size_t MaxFields, size_t OpcodeSpace = EMCORE_PROTOCOL_OPCODE_SPACE>
 class field_encoder {
 public:
     field_encoder() = default;
@@ -201,7 +206,7 @@ private:
         size_t field_count{0};
     };
 
-    etl::array<field_layout, 256> layouts_{}; // One layout per opcode
+    etl::array<field_layout, OpcodeSpace> layouts_{}; // One layout per opcode
 
     // Running Fletcher16 (sum1/sum2) inline helpers for stateful path
     void chk_add_inline(u8 byte_value) noexcept { sum1_ = (sum1_ + byte_value) % 255U; sum2_ = (sum2_ + sum1_) % 255U; }

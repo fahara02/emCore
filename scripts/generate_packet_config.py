@@ -98,6 +98,16 @@ def generate_packet_header(cfg: dict, out_path: Path):
     sync_len = len(sync_bytes)
     sync_list = ", ".join([f"0x{b:02X}" for b in sync_bytes])
 
+    # Derive opcode space: explicit packet.opcode_space or max(opcodes)+1
+    if len(opcodes) > 0:
+        try:
+            max_code = max(_to_byte(op['code']) for op in opcodes if 'code' in op)
+        except Exception:
+            max_code = 0xFF
+    else:
+        max_code = 0xFF
+    opcode_space = int(pkt.get('opcode_space', (max_code + 1)))
+
     # Emit header
     header = []
     header.append("#pragma once")
@@ -113,6 +123,7 @@ def generate_packet_header(cfg: dict, out_path: Path):
     header.append(f"inline constexpr bool PACKET_LENGTH_16BIT = {'true' if length16 else 'false'};")
     header.append(f"inline constexpr size_t PACKET_MAX_PAYLOAD = {max_payload};")
     header.append(f"inline constexpr size_t PACKET_SYNC_LEN = {sync_len};")
+    header.append(f"inline constexpr size_t OPCODE_SPACE = {opcode_space};")
     header.append("")
     header.append("// Provide a type for encoder/decoder template configuration")
     header.append("struct packet_config {")

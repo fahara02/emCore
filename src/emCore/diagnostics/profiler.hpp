@@ -147,7 +147,10 @@ struct trace_entry {
 class performance_profiler {
 private:
     static constexpr size_t max_tasks = config::max_tasks;
-    static constexpr size_t trace_buffer_size = 128;
+    #ifndef EMCORE_PROFILER_TRACE_CAP
+    #define EMCORE_PROFILER_TRACE_CAP 128
+    #endif
+    static constexpr size_t trace_buffer_size = EMCORE_PROFILER_TRACE_CAP;
     
     // Per-task metrics
     etl::vector<task_performance_metrics, max_tasks> task_metrics_;
@@ -157,7 +160,7 @@ private:
     system_performance_metrics system_metrics_;
     
     // Trace buffer (circular)
-    etl::circular_buffer<trace_entry, trace_buffer_size> trace_buffer_;
+    EMCORE_BSS_ATTR etl::circular_buffer<trace_entry, trace_buffer_size> trace_buffer_;
     
     // Profiling state
     bool profiling_enabled_{false};

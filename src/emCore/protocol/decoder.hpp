@@ -1,12 +1,12 @@
 #pragma once
 
 // emCore Field Decoder - Automatic structured data parsing from packets
-// - State machine driven field extraction
 // - Type-safe struct mapping with offsetof()
 // - Automatic endianness conversion (big-endian wire → host)
 // - No RTTI, no dynamic allocation; header-only; ETL only
 
 #include <emCore/core/types.hpp>
+#include <emCore/protocol/command_dispatcher.hpp>
 #include <etl/array.h>
 #include <cstddef>
 
@@ -16,6 +16,19 @@ namespace emCore::protocol {
 }
 
 namespace emCore::protocol {
+
+// Allow projects to configure opcode space size at compile time
+#ifndef EMCORE_PROTOCOL_OPCODE_SPACE
+#define EMCORE_PROTOCOL_OPCODE_SPACE 256
+#endif
+
+// Parser error codes
+enum class parser_error : u8 {
+    none = 0,
+    boundary_error,
+    length_overflow,
+    checksum_mismatch,
+};
 
 // Field type definitions
 enum class FieldType : u8 {
@@ -48,7 +61,7 @@ enum class FieldDecodeState : u8 {
 };
 
 // Field decoder state machine for automatic structured data parsing
-template <size_t MaxFields>
+template <size_t MaxFields, size_t OpcodeSpace = EMCORE_PROTOCOL_OPCODE_SPACE>
 class field_decoder {
 public:
     field_decoder() = default;
@@ -93,7 +106,7 @@ private:
         size_t field_count{0};
     };
     
-    etl::array<field_layout, 256> layouts_{}; // One layout per opcode
+    etl::array<field_layout, OpcodeSpace> layouts_{}; // One layout per opcode
     
     bool decode_single_field(const u8* data, u16 data_len, size_t& offset, 
                             const field_def& field, u8* target) noexcept {
