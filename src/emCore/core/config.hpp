@@ -20,7 +20,8 @@
 
 // If available, include generated messaging configuration macros produced from YAML.
 // This allows YAML to override the default capacities at compile time.
-#if defined(__has_include)
+// You can force-ignore this generated header by defining EMCORE_IGNORE_GENERATED_MESSAGING_CONFIG=1
+#if !defined(EMCORE_IGNORE_GENERATED_MESSAGING_CONFIG) && defined(__has_include)
 #  if __has_include(<emCore/generated/messaging_config.hpp>)
 #    include <emCore/generated/messaging_config.hpp>
 #  endif

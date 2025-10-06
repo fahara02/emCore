@@ -5,6 +5,7 @@ Usage: python generate_tasks.py [input.yaml] [output.hpp]
 """
 
 import sys
+import os
 from pathlib import Path
 
 try:
@@ -583,34 +584,37 @@ def generate_task_config_header(yaml_file, output_file):
     with open(output_file, 'w') as f:
         f.write(header)
 
-    # Derive messaging limits from YAML to allow config overrides
-    # - Queue capacity: use the maximum 'queue_size' across channels (fallback 16)
-    # - Max topics: number of channels (fallback 32)
-    # - Max subscribers per topic: maximum 'max_subscribers' across channels (fallback 8)
-    max_queue_size = 0
-    max_subscribers = 0
-    for ch in channels:
-        q = ch.get('queue_size', 0) or 0
-        s = ch.get('max_subscribers', 0) or 0
-        if isinstance(q, int):
-            max_queue_size = max(max_queue_size, q)
-        if isinstance(s, int):
-            max_subscribers = max(max_subscribers, s)
-    topics_count = len(channels)
+    # Derive messaging limits from YAML to allow config overrides (opt-in generation)
+    # Enable by setting environment variable: EMCORE_GENERATE_MESSAGING_CONFIG=1
+    emit_msg_cfg = os.getenv("EMCORE_GENERATE_MESSAGING_CONFIG", "0") == "1"
+    if emit_msg_cfg:
+        # - Queue capacity: use the maximum 'queue_size' across channels (fallback 16)
+        # - Max topics: number of channels (fallback 32)
+        # - Max subscribers per topic: maximum 'max_subscribers' across channels (fallback 8)
+        max_queue_size = 0
+        max_subscribers = 0
+        for ch in channels:
+            q = ch.get('queue_size', 0) or 0
+            s = ch.get('max_subscribers', 0) or 0
+            if isinstance(q, int):
+                max_queue_size = max(max_queue_size, q)
+            if isinstance(s, int):
+                max_subscribers = max(max_subscribers, s)
+        topics_count = len(channels)
 
-    # Defaults if YAML doesn't specify
-    if max_queue_size <= 0:
-        max_queue_size = 16
-    if topics_count <= 0:
-        topics_count = 32
-    if max_subscribers <= 0:
-        max_subscribers = 8
+        # Defaults if YAML doesn't specify
+        if max_queue_size <= 0:
+            max_queue_size = 16
+        if topics_count <= 0:
+            topics_count = 32
+        if max_subscribers <= 0:
+            max_subscribers = 8
 
-    # Emit generated messaging config header for compile-time overrides
-    generated_dir = Path(__file__).parent.parent / "src" / "emCore" / "generated"
-    generated_dir.mkdir(parents=True, exist_ok=True)
-    messaging_cfg_path = generated_dir / "messaging_config.hpp"
-    messaging_cfg = f"""
+        # Emit generated messaging config header for compile-time overrides
+        generated_dir = Path(__file__).parent.parent / "src" / "emCore" / "generated"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        messaging_cfg_path = generated_dir / "messaging_config.hpp"
+        messaging_cfg = f"""
 #pragma once
 // Auto-generated from {yaml_file}
 // Derived limits from YAML to override defaults in emCore::config
@@ -618,23 +622,25 @@ def generate_task_config_header(yaml_file, output_file):
 #define EMCORE_MSG_MAX_TOPICS {topics_count}
 #define EMCORE_MSG_MAX_SUBS_PER_TOPIC {max_subscribers}
 """
-    # Optional overrides from messaging root (per-topic queues and high/normal split)
-    if isinstance(messaging_root, dict):
-        tpm = messaging_root.get('topic_queues_per_mailbox', None)
-        hrn = messaging_root.get('topic_high_ratio_num', None)
-        hrd = messaging_root.get('topic_high_ratio_den', None)
-        if isinstance(tpm, int) and tpm > 0:
-            messaging_cfg += f"#define EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX {int(tpm)}\n"
-        if isinstance(hrn, int) and hrn > 0:
-            messaging_cfg += f"#define EMCORE_MSG_TOPIC_HIGH_RATIO_NUM {int(hrn)}\n"
-        if isinstance(hrd, int) and hrd > 0:
-            messaging_cfg += f"#define EMCORE_MSG_TOPIC_HIGH_RATIO_DEN {int(hrd)}\n"
-    # Format with actual yaml file name visible in header comment
-    messaging_cfg = messaging_cfg.replace("{yaml_file}", str(Path(yaml_file).name))
-    with open(messaging_cfg_path, 'w') as f:
-        f.write(messaging_cfg + "\n")  # Add newline at end of file
+        # Optional overrides from messaging root (per-topic queues and high/normal split)
+        if isinstance(messaging_root, dict):
+            tpm = messaging_root.get('topic_queues_per_mailbox', None)
+            hrn = messaging_root.get('topic_high_ratio_num', None)
+            hrd = messaging_root.get('topic_high_ratio_den', None)
+            if isinstance(tpm, int) and tpm > 0:
+                messaging_cfg += f"#define EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX {int(tpm)}\n"
+            if isinstance(hrn, int) and hrn > 0:
+                messaging_cfg += f"#define EMCORE_MSG_TOPIC_HIGH_RATIO_NUM {int(hrn)}\n"
+            if isinstance(hrd, int) and hrd > 0:
+                messaging_cfg += f"#define EMCORE_MSG_TOPIC_HIGH_RATIO_DEN {int(hrd)}\n"
+        # Format with actual yaml file name visible in header comment
+        messaging_cfg = messaging_cfg.replace("{yaml_file}", str(Path(yaml_file).name))
+        with open(messaging_cfg_path, 'w') as f:
+            f.write(messaging_cfg + "\n")  # Add newline at end of file
 
-    print(f"Generated {messaging_cfg_path} with YAML-derived messaging limits")
+        print(f"Generated {messaging_cfg_path} with YAML-derived messaging limits")
+    else:
+        print("Skipping generation of messaging_config.hpp (EMCORE_GENERATE_MESSAGING_CONFIG != 1)")
 
 def find_task_yaml():
     """Find task configuration YAML file by scanning all .yaml files for proper schema"""
