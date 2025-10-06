@@ -660,6 +660,10 @@ public:
     static small_log_t&                        event_log_small()  noexcept { return *(taskmaster::instance().small_log_); }
     static zc_log_t&                           event_log_zero()   noexcept { return *(taskmaster::instance().zc_log_); }
 
+    // Public aliases for zero-copy types
+    using zero_copy_pool_type = zc_pool_t;
+    using zero_copy_message  = zc_msg_t;
+
 private:
     /* Broker owned by taskmaster (constructed in ctor) */
     static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
