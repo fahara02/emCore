@@ -50,10 +50,24 @@ struct message_header {
     u16 sequence_number;            /* For ordering/acknowledgment */
 };
 
-/* Maximum payload sizes */
+/* Maximum payload sizes (overridable via build flags) */
+#ifdef EMCORE_SMALL_PAYLOAD_SIZE
+constexpr size_t small_payload_size = EMCORE_SMALL_PAYLOAD_SIZE;
+#else
 constexpr size_t small_payload_size = 16;   /* Inline small messages */
+#endif
+
+#ifdef EMCORE_MEDIUM_PAYLOAD_SIZE
+constexpr size_t medium_payload_size = EMCORE_MEDIUM_PAYLOAD_SIZE;
+#else
 constexpr size_t medium_payload_size = 64;  /* Most common size */
+#endif
+
+#ifdef EMCORE_LARGE_PAYLOAD_SIZE
+constexpr size_t large_payload_size = EMCORE_LARGE_PAYLOAD_SIZE;
+#else
 constexpr size_t large_payload_size = 256;  /* Large messages */
+#endif
 
 template<size_t MaxPayloadSize = medium_payload_size>
 struct message_envelope {

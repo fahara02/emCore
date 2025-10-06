@@ -18,6 +18,11 @@
 #define EMCORE_ENABLE_EVENT_LOGS 0
 #endif
 
+// Enable/disable small-message broker
+#ifndef EMCORE_ENABLE_SMALL_BROKER
+#define EMCORE_ENABLE_SMALL_BROKER 1
+#endif
+
 // If available, include generated messaging configuration macros produced from YAML.
 // This allows YAML to override the default capacities at compile time.
 // You can force-ignore this generated header by defining EMCORE_IGNORE_GENERATED_MESSAGING_CONFIG=1

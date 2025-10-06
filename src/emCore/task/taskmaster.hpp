@@ -10,8 +10,12 @@
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
 #include "../messaging/message_types.hpp"
+#if EMCORE_ENABLE_ZC
 #include "../messaging/zero_copy.hpp"
+#endif
+#if EMCORE_ENABLE_EVENT_LOGS
 #include "../messaging/event_log.hpp"
+#endif
 #include "../messaging/qos_pubsub.hpp"
 #include "../messaging/distributed_state.hpp"
 #include "rtos_scheduler.hpp"
@@ -82,11 +86,14 @@ private:
     alignas(medium_broker_t) unsigned char EMCORE_BSS_ATTR broker_storage_[sizeof(medium_broker_t)]{};
     etl::unique_ptr<medium_broker_t, messaging::pool_deleter<medium_broker_t>> broker_{};
 
+    #if EMCORE_ENABLE_SMALL_BROKER
     using small_broker_t = messaging::message_broker<small_message, config::max_tasks>;
     alignas(small_broker_t) unsigned char EMCORE_BSS_ATTR small_broker_storage_[sizeof(small_broker_t)]{};
     etl::unique_ptr<small_broker_t, messaging::pool_deleter<small_broker_t>> small_broker_{};
+    #endif
 
     // Zero-copy pool and broker (sized via config)
+    #if EMCORE_ENABLE_ZC
     static constexpr size_t zc_block_size_  = config::zc_block_size;
     static constexpr size_t zc_block_count_ = config::zc_block_count;
     using zc_pool_t = messaging::zero_copy_pool<zc_block_size_, zc_block_count_>;
@@ -97,6 +104,7 @@ private:
     zc_pool_t* zc_pool_ptr_{nullptr};
     alignas(zc_broker_t) unsigned char EMCORE_BSS_ATTR zc_broker_storage_[sizeof(zc_broker_t)]{};
     etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>> zc_broker_{};
+    #endif
 
     // Event logs (capacities via config)
     #if EMCORE_ENABLE_EVENT_LOGS
@@ -127,12 +135,16 @@ private:
         auto* mptr = new (static_cast<void*>(broker_storage_)) medium_broker_t();
         broker_ = etl::unique_ptr<medium_broker_t, messaging::pool_deleter<medium_broker_t>>(mptr, messaging::pool_deleter<medium_broker_t>{nullptr});
         // Small broker
+        #if EMCORE_ENABLE_SMALL_BROKER
         auto* sptr = new (static_cast<void*>(small_broker_storage_)) small_broker_t();
         small_broker_ = etl::unique_ptr<small_broker_t, messaging::pool_deleter<small_broker_t>>(sptr, messaging::pool_deleter<small_broker_t>{nullptr});
+        #endif
         // Zero-copy pool + broker
+        #if EMCORE_ENABLE_ZC
         zc_pool_ptr_ = new (static_cast<void*>(zc_pool_storage_)) zc_pool_t();
         auto* zbptr = new (static_cast<void*>(zc_broker_storage_)) zc_broker_t();
         zc_broker_ = etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>>(zbptr, messaging::pool_deleter<zc_broker_t>{nullptr});
+        #endif
         // Event logs
         #if EMCORE_ENABLE_EVENT_LOGS
         med_log_   = new (static_cast<void*>(med_log_storage_))   med_log_t();
@@ -541,6 +553,7 @@ public:
     }
 
     /* Small-message wrappers */
+    #if EMCORE_ENABLE_SMALL_BROKER
     static result<void, error_code> subscribe_small(topic_id_t topic_id, task_id_t task_id) noexcept {
         return taskmaster::broker_small().subscribe(topic_id, task_id);
     }
@@ -552,8 +565,10 @@ public:
     static result<messaging::small_message, error_code> receive_small(task_id_t self, timeout_ms_t timeout) noexcept {
         return taskmaster::broker_small().receive(self, timeout);
     }
+    #endif
 
     /* Zero-copy wrappers */
+    #if EMCORE_ENABLE_ZC
     static result<void, error_code> subscribe_zero(topic_id_t topic_id, task_id_t task_id) noexcept {
         return taskmaster::broker_zero().subscribe(topic_id, task_id);
     }
@@ -565,6 +580,7 @@ public:
     static result<void, error_code> publish_zero(u16 topic_id, zc_msg_t& msg, task_id_t from) noexcept {
         return taskmaster::broker_zero().publish(topic_id, msg, from);
     }
+    #endif
 
     /* QoS helpers (non-owning, no dynamic allocation) */
     static messaging::qos_publisher<messaging::medium_message>
@@ -577,6 +593,7 @@ public:
         return messaging::qos_subscriber<messaging::medium_message>(taskmaster::broker_medium(), self_task_id, ack_topic_id);
     }
 
+    #if EMCORE_ENABLE_SMALL_BROKER
     static messaging::qos_publisher<messaging::small_message>
     make_qos_publisher_small(task_id_t from_task_id, u16 ack_topic_id) noexcept {
         return messaging::qos_publisher<messaging::small_message>(taskmaster::broker_small(), from_task_id, ack_topic_id);
@@ -595,6 +612,7 @@ public:
         return messaging::distributed_state<StateT, ProposeTopicId, AckTopicId, CommitTopicId, MaxPeers, MaxOutstanding>(
             taskmaster::broker_small(), self_task_id, initial);
     }
+    #endif
     
     /* Publish message to topic */
     template<typename MessageType = medium_message>
@@ -657,9 +675,13 @@ public:
 public:
     // Accessors to unified messaging package
     static messaging::Ibroker<medium_message>& broker_medium() noexcept { return *(taskmaster::instance().broker_); }
+    #if EMCORE_ENABLE_SMALL_BROKER
     static messaging::Ibroker<small_message>&  broker_small()  noexcept { return *(taskmaster::instance().small_broker_); }
+    #endif
+    #if EMCORE_ENABLE_ZC
     static messaging::Ibroker<zc_msg_t>&       broker_zero()   noexcept { return *(taskmaster::instance().zc_broker_); }
     static zc_pool_t&                          zc_pool()       noexcept { return *(taskmaster::instance().zc_pool_ptr_); }
+    #endif
     #if EMCORE_ENABLE_EVENT_LOGS
     static med_log_t&                          event_log_medium() noexcept { return *(taskmaster::instance().med_log_); }
     static small_log_t&                        event_log_small()  noexcept { return *(taskmaster::instance().small_log_); }
@@ -667,8 +689,10 @@ public:
     #endif
 
     // Public aliases for zero-copy types
+    #if EMCORE_ENABLE_ZC
     using zero_copy_pool_type = zc_pool_t;
     using zero_copy_message  = zc_msg_t;
+    #endif
 
 private:
     /* Broker owned by taskmaster (constructed in ctor) */
