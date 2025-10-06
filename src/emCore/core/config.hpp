@@ -4,6 +4,20 @@
 
 #include "types.hpp"
 
+// Optional attribute hook to relocate heavy BSS to external RAM on capable MCUs (e.g., ESP32 PSRAM).
+// Keep empty by default for MCU-agnostic header-only design.
+#ifndef EMCORE_BSS_ATTR
+#define EMCORE_BSS_ATTR
+#endif
+
+// Feature toggles (macros for preprocessor guards)
+#ifndef EMCORE_ENABLE_ZC
+#define EMCORE_ENABLE_ZC 1
+#endif
+#ifndef EMCORE_ENABLE_EVENT_LOGS
+#define EMCORE_ENABLE_EVENT_LOGS 1
+#endif
+
 // If available, include generated messaging configuration macros produced from YAML.
 // This allows YAML to override the default capacities at compile time.
 #if defined(__has_include)
@@ -30,19 +44,19 @@ namespace emCore::config {
         #ifdef EMCORE_MSG_QUEUE_CAPACITY
         constexpr size_t default_mailbox_queue_capacity = EMCORE_MSG_QUEUE_CAPACITY;
         #else
-        constexpr size_t default_mailbox_queue_capacity = 16;
+        constexpr size_t default_mailbox_queue_capacity = 4; // tightened to reduce RAM
         #endif
 
         #ifdef EMCORE_MSG_MAX_TOPICS
         constexpr size_t default_max_topics = EMCORE_MSG_MAX_TOPICS;
         #else
-        constexpr size_t default_max_topics = 32;
+        constexpr size_t default_max_topics = 12; // tightened to reduce RAM
         #endif
 
         #ifdef EMCORE_MSG_MAX_SUBS_PER_TOPIC
         constexpr size_t default_max_subscribers_per_topic = EMCORE_MSG_MAX_SUBS_PER_TOPIC;
         #else
-        constexpr size_t default_max_subscribers_per_topic = 8;
+        constexpr size_t default_max_subscribers_per_topic = 3; // tightened to reduce RAM
         #endif
 
         // Mailbox per-topic sub-queues configuration
@@ -50,7 +64,7 @@ namespace emCore::config {
         #ifdef EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX
         constexpr size_t default_max_topic_queues_per_mailbox = EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX;
         #else
-        constexpr size_t default_max_topic_queues_per_mailbox = 4;
+        constexpr size_t default_max_topic_queues_per_mailbox = 1; // tightened to reduce RAM
         #endif
 
         // High-priority reservation ratio for each per-topic queue (numerator/denominator)
@@ -70,7 +84,7 @@ namespace emCore::config {
         #ifdef EMCORE_MSG_QOS_PENDING_LIMIT
         constexpr size_t default_qos_pending_limit = EMCORE_MSG_QOS_PENDING_LIMIT;
         #else
-        constexpr size_t default_qos_pending_limit = 32;
+        constexpr size_t default_qos_pending_limit = 4; // tightened to reduce RAM
         #endif
 
         #ifdef EMCORE_MSG_QOS_ACK_TIMEOUT_US
@@ -82,7 +96,39 @@ namespace emCore::config {
         #ifdef EMCORE_MSG_REPUBLISH_BUFFER
         constexpr size_t default_republish_buffer = EMCORE_MSG_REPUBLISH_BUFFER;
         #else
-        constexpr size_t default_republish_buffer = 16; // store copies for retry
+        constexpr size_t default_republish_buffer = 4; // tightened to reduce RAM
+        #endif
+
+        // Zero-copy pool sizing (constexpr used by templates)
+        #ifdef EMCORE_ZC_BLOCK_SIZE
+        constexpr size_t zc_block_size = EMCORE_ZC_BLOCK_SIZE;
+        #else
+        constexpr size_t zc_block_size = 16; // conservative default
+        #endif
+
+        #ifdef EMCORE_ZC_BLOCK_COUNT
+        constexpr size_t zc_block_count = EMCORE_ZC_BLOCK_COUNT;
+        #else
+        constexpr size_t zc_block_count = 4;  // conservative default
+        #endif
+
+        // Event log capacities (constexpr used by templates)
+        #ifdef EMCORE_EVENT_LOG_MED_CAP
+        constexpr size_t event_log_med_cap = EMCORE_EVENT_LOG_MED_CAP;
+        #else
+        constexpr size_t event_log_med_cap = 4;  // tightened to reduce RAM
+        #endif
+
+        #ifdef EMCORE_EVENT_LOG_SML_CAP
+        constexpr size_t event_log_sml_cap = EMCORE_EVENT_LOG_SML_CAP;
+        #else
+        constexpr size_t event_log_sml_cap = 4;  // tightened to reduce RAM
+        #endif
+
+        #ifdef EMCORE_EVENT_LOG_ZC_CAP
+        constexpr size_t event_log_zc_cap = EMCORE_EVENT_LOG_ZC_CAP;
+        #else
+        constexpr size_t event_log_zc_cap = 2;  // tightened to reduce RAM
         #endif
         
         // Memory pool configuration
