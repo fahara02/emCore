@@ -10,6 +10,10 @@
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
 #include "../messaging/message_types.hpp"
+#include "../messaging/zero_copy.hpp"
+#include "../messaging/event_log.hpp"
+#include "../messaging/qos_pubsub.hpp"
+#include "../messaging/distributed_state.hpp"
 #include "rtos_scheduler.hpp"
 #include "watchdog.hpp"
 
@@ -73,9 +77,37 @@ private:
     volatile bool tasks_ready_{false};  /* Flag to signal tasks can start */
     timestamp_t scheduler_start_time_{0};
     u32 total_context_switches_{0};
-    using broker_t = messaging::message_broker<medium_message, config::max_tasks>;
-    alignas(broker_t) unsigned char broker_storage_[sizeof(broker_t)]{};
-    etl::unique_ptr<broker_t, messaging::pool_deleter<broker_t>> broker_{};
+    // Brokers & pools
+    using medium_broker_t = messaging::message_broker<medium_message, config::max_tasks>;
+    alignas(medium_broker_t) unsigned char broker_storage_[sizeof(medium_broker_t)]{};
+    etl::unique_ptr<medium_broker_t, messaging::pool_deleter<medium_broker_t>> broker_{};
+
+    using small_broker_t = messaging::message_broker<small_message, config::max_tasks>;
+    alignas(small_broker_t) unsigned char small_broker_storage_[sizeof(small_broker_t)]{};
+    etl::unique_ptr<small_broker_t, messaging::pool_deleter<small_broker_t>> small_broker_{};
+
+    // Zero-copy pool and broker (defaults: 64 bytes x 16 blocks)
+    static constexpr size_t zc_block_size_ = 64;
+    static constexpr size_t zc_block_count_ = 16;
+    using zc_pool_t = messaging::zero_copy_pool<zc_block_size_, zc_block_count_>;
+    using zc_msg_t  = messaging::zc_message_envelope<zc_pool_t>;
+    using zc_broker_t = messaging::message_broker<zc_msg_t, config::max_tasks>;
+
+    alignas(zc_pool_t)   unsigned char zc_pool_storage_[sizeof(zc_pool_t)]{};
+    zc_pool_t* zc_pool_ptr_{nullptr};
+    alignas(zc_broker_t) unsigned char zc_broker_storage_[sizeof(zc_broker_t)]{};
+    etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>> zc_broker_{};
+
+    // Event logs
+    using med_log_t   = messaging::event_log<medium_message, 128, true>;
+    using small_log_t = messaging::event_log<small_message, 128, true>;
+    using zc_log_t    = messaging::event_log<zc_msg_t, 64, true>;
+    alignas(med_log_t)   unsigned char med_log_storage_[sizeof(med_log_t)]{};
+    alignas(small_log_t) unsigned char small_log_storage_[sizeof(small_log_t)]{};
+    alignas(zc_log_t)    unsigned char zc_log_storage_[sizeof(zc_log_t)]{};
+    med_log_t*   med_log_{nullptr};
+    small_log_t* small_log_{nullptr};
+    zc_log_t*    zc_log_{nullptr};
     timestamp_t total_idle_time_{0};
     timestamp_t last_idle_time_{0};
     taskmaster() noexcept
@@ -88,9 +120,21 @@ private:
         , total_idle_time_{0}
         , last_idle_time_{0}
     {
-        /* Construct broker in-place in internal storage to avoid pool exhaustion */
-        auto* bptr = new (static_cast<void*>(broker_storage_)) broker_t();
-        broker_ = etl::unique_ptr<broker_t, messaging::pool_deleter<broker_t>>(bptr, messaging::pool_deleter<broker_t>{nullptr});
+        /* Construct brokers/pools/logs in-place to avoid dynamic allocation */
+        // Medium broker
+        auto* mptr = new (static_cast<void*>(broker_storage_)) medium_broker_t();
+        broker_ = etl::unique_ptr<medium_broker_t, messaging::pool_deleter<medium_broker_t>>(mptr, messaging::pool_deleter<medium_broker_t>{nullptr});
+        // Small broker
+        auto* sptr = new (static_cast<void*>(small_broker_storage_)) small_broker_t();
+        small_broker_ = etl::unique_ptr<small_broker_t, messaging::pool_deleter<small_broker_t>>(sptr, messaging::pool_deleter<small_broker_t>{nullptr});
+        // Zero-copy pool + broker
+        zc_pool_ptr_ = new (static_cast<void*>(zc_pool_storage_)) zc_pool_t();
+        auto* zbptr = new (static_cast<void*>(zc_broker_storage_)) zc_broker_t();
+        zc_broker_ = etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>>(zbptr, messaging::pool_deleter<zc_broker_t>{nullptr});
+        // Event logs
+        med_log_   = new (static_cast<void*>(med_log_storage_))   med_log_t();
+        small_log_ = new (static_cast<void*>(small_log_storage_)) small_log_t();
+        zc_log_    = new (static_cast<void*>(zc_log_storage_))    zc_log_t();
     }
     
     
@@ -491,6 +535,62 @@ public:
     static result<void, error_code> subscribe(topic_id_t topic_id, task_id_t task_id) noexcept {
         return get_broker().subscribe(topic_id, task_id);
     }
+
+    /* Small-message wrappers */
+    static result<void, error_code> subscribe_small(topic_id_t topic_id, task_id_t task_id) noexcept {
+        return taskmaster::broker_small().subscribe(topic_id, task_id);
+    }
+
+    static result<void, error_code> publish_small(u16 topic_id, messaging::small_message& msg, task_id_t from) noexcept {
+        return taskmaster::broker_small().publish(topic_id, msg, from);
+    }
+
+    static result<messaging::small_message, error_code> receive_small(task_id_t self, timeout_ms_t timeout) noexcept {
+        return taskmaster::broker_small().receive(self, timeout);
+    }
+
+    /* Zero-copy wrappers */
+    static result<void, error_code> subscribe_zero(topic_id_t topic_id, task_id_t task_id) noexcept {
+        return taskmaster::broker_zero().subscribe(topic_id, task_id);
+    }
+
+    static result<zc_msg_t, error_code> receive_zero(task_id_t self, timeout_ms_t timeout) noexcept {
+        return taskmaster::broker_zero().receive(self, timeout);
+    }
+
+    static result<void, error_code> publish_zero(u16 topic_id, zc_msg_t& msg, task_id_t from) noexcept {
+        return taskmaster::broker_zero().publish(topic_id, msg, from);
+    }
+
+    /* QoS helpers (non-owning, no dynamic allocation) */
+    static messaging::qos_publisher<messaging::medium_message>
+    make_qos_publisher_medium(task_id_t from_task_id, u16 ack_topic_id) noexcept {
+        return messaging::qos_publisher<messaging::medium_message>(taskmaster::broker_medium(), from_task_id, ack_topic_id);
+    }
+
+    static messaging::qos_subscriber<messaging::medium_message>
+    make_qos_subscriber_medium(task_id_t self_task_id, u16 ack_topic_id) noexcept {
+        return messaging::qos_subscriber<messaging::medium_message>(taskmaster::broker_medium(), self_task_id, ack_topic_id);
+    }
+
+    static messaging::qos_publisher<messaging::small_message>
+    make_qos_publisher_small(task_id_t from_task_id, u16 ack_topic_id) noexcept {
+        return messaging::qos_publisher<messaging::small_message>(taskmaster::broker_small(), from_task_id, ack_topic_id);
+    }
+
+    static messaging::qos_subscriber<messaging::small_message>
+    make_qos_subscriber_small(task_id_t self_task_id, u16 ack_topic_id) noexcept {
+        return messaging::qos_subscriber<messaging::small_message>(taskmaster::broker_small(), self_task_id, ack_topic_id);
+    }
+
+    /* Distributed-state helper (small_message coordination) */
+    template <typename StateT, u16 ProposeTopicId, u16 AckTopicId, u16 CommitTopicId,
+              size_t MaxPeers, size_t MaxOutstanding = 4>
+    static messaging::distributed_state<StateT, ProposeTopicId, AckTopicId, CommitTopicId, MaxPeers, MaxOutstanding>
+    make_distributed_state(task_id_t self_task_id, const StateT& initial) noexcept {
+        return messaging::distributed_state<StateT, ProposeTopicId, AckTopicId, CommitTopicId, MaxPeers, MaxOutstanding>(
+            taskmaster::broker_small(), self_task_id, initial);
+    }
     
     /* Publish message to topic */
     template<typename MessageType = medium_message>
@@ -550,7 +650,17 @@ public:
     }
 
 
-    private:
+public:
+    // Accessors to unified messaging package
+    static messaging::Ibroker<medium_message>& broker_medium() noexcept { return *(taskmaster::instance().broker_); }
+    static messaging::Ibroker<small_message>&  broker_small()  noexcept { return *(taskmaster::instance().small_broker_); }
+    static messaging::Ibroker<zc_msg_t>&       broker_zero()   noexcept { return *(taskmaster::instance().zc_broker_); }
+    static zc_pool_t&                          zc_pool()       noexcept { return *(taskmaster::instance().zc_pool_ptr_); }
+    static med_log_t&                          event_log_medium() noexcept { return *(taskmaster::instance().med_log_); }
+    static small_log_t&                        event_log_small()  noexcept { return *(taskmaster::instance().small_log_); }
+    static zc_log_t&                           event_log_zero()   noexcept { return *(taskmaster::instance().zc_log_); }
+
+private:
     /* Broker owned by taskmaster (constructed in ctor) */
     static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
         return *(taskmaster::instance().broker_);

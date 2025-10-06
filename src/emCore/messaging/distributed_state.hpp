@@ -24,6 +24,10 @@ public:
     distributed_state(broker_uptr<small_message>& broker, task_id_t self_task_id, const StateT& initial) noexcept
         : broker_(*broker), self_task_id_(self_task_id), state_(initial) {}
 
+    // New: allow constructing with a non-owning broker reference (no unique_ptr required)
+    distributed_state(Ibroker<small_message>& broker, task_id_t self_task_id, const StateT& initial) noexcept
+        : broker_(broker), self_task_id_(self_task_id), state_(initial) {}
+
     // Start a new proposal; returns sequence (>0) or 0 if queue full
     u16 propose(const StateT& new_state) noexcept {
         if (pending_.size() >= pending_.capacity()) { return 0; }

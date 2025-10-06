@@ -20,6 +20,10 @@ public:
     qos_publisher(broker_uptr<MsgType>& broker, task_id_t from_task_id, u16 ack_topic_id) noexcept
         : broker_(*broker), from_task_id_(from_task_id), ack_topic_id_(ack_topic_id) {}
 
+    // New: allow constructing with a non-owning broker reference (no unique_ptr required)
+    qos_publisher(Ibroker<MsgType>& broker, task_id_t from_task_id, u16 ack_topic_id) noexcept
+        : broker_(broker), from_task_id_(from_task_id), ack_topic_id_(ack_topic_id) {}
+
     result<void, error_code> publish(u16 topic_id, MsgType& msg) noexcept {
         msg.header.flags = static_cast<u8>(static_cast<message_flags>(msg.header.flags) | message_flags::requires_ack);
         if (msg.header.timestamp == 0) { msg.header.timestamp = platform::get_system_time_us(); }
@@ -90,6 +94,10 @@ class qos_subscriber {
 public:
     qos_subscriber(broker_uptr<MsgType>& broker, task_id_t self_task_id, u16 ack_topic_id) noexcept
         : broker_(*broker), self_task_id_(self_task_id), ack_topic_id_(ack_topic_id) {}
+
+    // New: allow constructing with a non-owning broker reference (no unique_ptr required)
+    qos_subscriber(Ibroker<MsgType>& broker, task_id_t self_task_id, u16 ack_topic_id) noexcept
+        : broker_(broker), self_task_id_(self_task_id), ack_topic_id_(ack_topic_id) {}
 
     result<MsgType, error_code> receive(timeout_ms_t timeout) noexcept {
         auto res = broker_.receive(self_task_id_, timeout);
