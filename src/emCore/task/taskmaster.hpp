@@ -99,6 +99,7 @@ private:
     etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>> zc_broker_{};
 
     // Event logs (capacities via config)
+    #if EMCORE_ENABLE_EVENT_LOGS
     using med_log_t   = messaging::event_log<medium_message, config::event_log_med_cap, true>;
     using small_log_t = messaging::event_log<small_message, config::event_log_sml_cap, true>;
     using zc_log_t    = messaging::event_log<zc_msg_t,      config::event_log_zc_cap,  true>;
@@ -108,6 +109,7 @@ private:
     med_log_t*   med_log_{nullptr};
     small_log_t* small_log_{nullptr};
     zc_log_t*    zc_log_{nullptr};
+    #endif
     timestamp_t total_idle_time_{0};
     timestamp_t last_idle_time_{0};
     taskmaster() noexcept
@@ -132,9 +134,11 @@ private:
         auto* zbptr = new (static_cast<void*>(zc_broker_storage_)) zc_broker_t();
         zc_broker_ = etl::unique_ptr<zc_broker_t, messaging::pool_deleter<zc_broker_t>>(zbptr, messaging::pool_deleter<zc_broker_t>{nullptr});
         // Event logs
+        #if EMCORE_ENABLE_EVENT_LOGS
         med_log_   = new (static_cast<void*>(med_log_storage_))   med_log_t();
         small_log_ = new (static_cast<void*>(small_log_storage_)) small_log_t();
         zc_log_    = new (static_cast<void*>(zc_log_storage_))    zc_log_t();
+        #endif
     }
     
     
@@ -656,9 +660,11 @@ public:
     static messaging::Ibroker<small_message>&  broker_small()  noexcept { return *(taskmaster::instance().small_broker_); }
     static messaging::Ibroker<zc_msg_t>&       broker_zero()   noexcept { return *(taskmaster::instance().zc_broker_); }
     static zc_pool_t&                          zc_pool()       noexcept { return *(taskmaster::instance().zc_pool_ptr_); }
+    #if EMCORE_ENABLE_EVENT_LOGS
     static med_log_t&                          event_log_medium() noexcept { return *(taskmaster::instance().med_log_); }
     static small_log_t&                        event_log_small()  noexcept { return *(taskmaster::instance().small_log_); }
     static zc_log_t&                           event_log_zero()   noexcept { return *(taskmaster::instance().zc_log_); }
+    #endif
 
     // Public aliases for zero-copy types
     using zero_copy_pool_type = zc_pool_t;
