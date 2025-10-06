@@ -13,9 +13,19 @@
 
 namespace emCore::protocol {
 
-// Allow projects to configure opcode space size at compile time
+// Allow projects to configure opcode space size at compile time.
+// Prefer the generated value if available, otherwise fallback to 256.
 #ifndef EMCORE_PROTOCOL_OPCODE_SPACE
-#define EMCORE_PROTOCOL_OPCODE_SPACE 256
+#  if defined(__has_include)
+#    if __has_include(<generated_packet_config.hpp>)
+#      include <generated_packet_config.hpp>
+#      define EMCORE_PROTOCOL_OPCODE_SPACE ::emCore::protocol::gen::OPCODE_SPACE
+#    else
+#      define EMCORE_PROTOCOL_OPCODE_SPACE 256
+#    endif
+#  else
+#    define EMCORE_PROTOCOL_OPCODE_SPACE 256
+#  endif
 #endif
 
 // Encoder state machine states
