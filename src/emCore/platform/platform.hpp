@@ -5,12 +5,39 @@
 #include "platform_base.hpp"
 #include <cstdio>
 
+// Auto-detect platform if the build system did not provide one
+#if !defined(EMCORE_PLATFORM_ESP32) && \
+    !defined(EMCORE_PLATFORM_ARDUINO) && \
+    !defined(EMCORE_PLATFORM_STM32) && \
+    !defined(EMCORE_PLATFORM_POSIX) && \
+    !defined(EMCORE_PLATFORM_GENERIC)
+  #if defined(ESP32) || defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)
+    #define EMCORE_PLATFORM_ESP32
+  #elif defined(ARDUINO)
+    #define EMCORE_PLATFORM_ARDUINO
+  #elif defined(__unix__) || defined(__APPLE__)
+    #define EMCORE_PLATFORM_POSIX
+  #else
+    #define EMCORE_PLATFORM_GENERIC
+  #endif
+#endif
+
 #if defined(EMCORE_PLATFORM_ESP32)
 #  include "impl_esp32.hpp"
    namespace emCore::platform { namespace impl = emCore::platform::impl_esp32; }
 #elif defined(EMCORE_PLATFORM_ARDUINO)
-#  include "impl_arduino.hpp"
-   namespace emCore::platform { namespace impl = emCore::platform::impl_arduino; }
+#  if defined(__has_include)
+#    if __has_include(<Arduino.h>)
+#      include "impl_arduino.hpp"
+       namespace emCore::platform { namespace impl = emCore::platform::impl_arduino; }
+#    else
+#      include "impl_generic.hpp"
+       namespace emCore::platform { namespace impl = emCore::platform::impl_generic; }
+#    endif
+#  else
+#    include "impl_arduino.hpp"
+     namespace emCore::platform { namespace impl = emCore::platform::impl_arduino; }
+#  endif
 #elif defined(EMCORE_PLATFORM_STM32)
 #  include "impl_stm32.hpp"
    namespace emCore::platform { namespace impl = emCore::platform::impl_stm32; }
@@ -64,6 +91,8 @@ namespace detail {
 inline void log_sink(const char* msg) noexcept {
 #if defined(EMCORE_PLATFORM_ARDUINO)
     if (msg) { Serial.println(msg); }
+#elif defined(EMCORE_PLATFORM_ESP32)
+    if (msg) { std::printf("%s\n", msg); }
 #elif defined(EMCORE_PLATFORM_POSIX)
     if (msg) { std::puts(msg); }
 #elif defined(EMCORE_PLATFORM_STM32)
