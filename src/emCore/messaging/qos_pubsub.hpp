@@ -4,7 +4,7 @@
 
 #include "../core/types.hpp"
 #include "../core/config.hpp"
-#include "../platform/platform.hpp"
+#include "../os/time.hpp"
 #include "message_types.hpp"
 #include "message_broker.hpp" // for Ibroker
 #include "../error/result.hpp"
@@ -26,7 +26,7 @@ public:
 
     result<void, error_code> publish(u16 topic_id, MsgType& msg) noexcept {
         msg.header.flags = static_cast<u8>(static_cast<message_flags>(msg.header.flags) | message_flags::requires_ack);
-        if (msg.header.timestamp == 0) { msg.header.timestamp = platform::get_system_time_us(); }
+        if (msg.header.timestamp == 0) { msg.header.timestamp = os::time_us(); }
         if (msg.header.sequence_number == 0) { msg.header.sequence_number = next_seq_(); }
         msg.header.type = topic_id;
 
@@ -45,7 +45,7 @@ public:
     }
 
     void pump_retransmit() noexcept {
-        const timestamp_t now = platform::get_system_time_us();
+        const timestamp_t now = os::time_us();
         for (auto iter = pending_.begin(); iter != pending_.end(); ++iter) {
             pending_entry& entry_ref = iter->second;
             if ((now - entry_ref.last_send) >= static_cast<timestamp_t>(config::default_ack_timeout_us)) {
@@ -129,7 +129,7 @@ private:
         ack_msg.header.sender_id = self_task_id_.value();
         ack_msg.header.receiver_id = to_sender;
         ack_msg.header.payload_size = sizeof(ack);
-        ack_msg.header.timestamp = platform::get_system_time_us();
+        ack_msg.header.timestamp = os::time_us();
         if (sizeof(ack) <= sizeof(ack_msg.payload)) {
             const u8* src = reinterpret_cast<const u8*>(&ack);
             for (size_t i = 0; i < sizeof(ack); ++i) { ack_msg.payload[i] = src[i]; }

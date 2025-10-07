@@ -3,6 +3,8 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include "../core/strong_types.hpp"
+#include "../os/time.hpp"
+#include "../os/tasks.hpp"
 #include "../platform/platform.hpp"
 
 #include <etl/vector.h>
@@ -165,7 +167,7 @@ public:
                 
             case yield_strategy::adaptive:
                 // Yield based on execution time and system load
-                timestamp_t now = platform::get_system_time_us();
+                timestamp_t now = os::time_us();
                 if (context->last_execution_start > 0) {
                     duration_t execution_time = now - context->last_execution_start;
                     should_yield = execution_time > (context->max_execution_time_us / 2);
@@ -174,7 +176,7 @@ public:
         }
         
         if (should_yield) {
-            platform::task_yield(); // Clean platform abstraction
+            os::yield();
         }
     }
     
@@ -184,7 +186,7 @@ public:
     void start_execution_timing(task_id_t task_id) noexcept {
         auto* context = find_context(task_id);
         if (context != nullptr) {
-            context->last_execution_start = platform::get_system_time_us();
+            context->last_execution_start = os::time_us();
         }
     }
     
@@ -194,7 +196,7 @@ public:
     void end_execution_timing(task_id_t task_id) noexcept {
         auto* context = find_context(task_id);
         if (context != nullptr && context->last_execution_start > 0) {
-            timestamp_t now = platform::get_system_time_us();
+            timestamp_t now = os::time_us();
             duration_t execution_time = now - context->last_execution_start;
             
             context->total_execution_time_us += execution_time;
@@ -218,7 +220,7 @@ public:
         }
         
         // Platform-agnostic stack monitoring
-        size_t stack_free_bytes = platform::get_stack_high_water_mark();
+        size_t stack_free_bytes = os::stack_high_water_mark();
         if (stack_free_bytes > 0 && context->stack_size_bytes > 0) {
             context->stack_used_bytes = context->stack_size_bytes - stack_free_bytes;
             context->stack_high_water_mark = context->stack_used_bytes;

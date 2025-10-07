@@ -3,7 +3,7 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include "../core/strong_types.hpp"
-#include "../platform/platform.hpp"
+#include "../os/time.hpp"
 #include "../error/result.hpp"
 #include "../error/error_handler.hpp"
 
@@ -105,7 +105,7 @@ private:
             case watchdog_action::system_reset:
                 platform::log("WATCHDOG: SYSTEM RESET TRIGGERED!");
                 // Trigger system reset via platform abstraction
-                platform::delay_ms(100); // Allow log to flush
+                os::delay_ms(100); // Allow log to flush
                 platform::system_reset(); // Clean platform abstraction
                 break;
         }
@@ -133,7 +133,7 @@ public:
         entry.task_id = task_id;
         entry.timeout_ms = timeout.value();
         entry.action = action;
-        entry.last_feed_time = platform::get_system_time_us();
+        entry.last_feed_time = os::time_us();
         entry.enabled = true;
         
         entries_.push_back(entry);
@@ -147,7 +147,7 @@ public:
         auto* entry = find_entry(task_id);
         if (entry != nullptr) {
             // Use volatile write to prevent compiler reordering
-            timestamp_t now = platform::get_system_time_us();
+            timestamp_t now = os::time_us();
             entry->last_feed_time = now;
         }
     }
@@ -238,7 +238,7 @@ public:
             
             if (system_elapsed_ms >= system_timeout_ms_) {
                 platform::log("SYSTEM WATCHDOG TIMEOUT!");
-                platform::delay_ms(100);
+                os::delay_ms(100);
                 // Trigger system reset via platform abstraction
                 platform::system_reset();
             }
@@ -251,7 +251,7 @@ public:
         if (entry != nullptr) {
             entry->enabled = enable;
             if (enable) {
-                entry->last_feed_time = platform::get_system_time_us();
+                entry->last_feed_time = os::time_us();
             }
         }
     }
@@ -261,7 +261,7 @@ public:
     void enable_system_watchdog(duration_t timeout_ms) noexcept {
         system_watchdog_enabled_ = true;
         system_timeout_ms_ = timeout_ms;
-        last_system_feed_ = platform::get_system_time_us();
+        last_system_feed_ = os::time_us();
         
         platform::logf("System watchdog enabled: %u ms timeout", timeout_ms);
     }
@@ -270,7 +270,7 @@ public:
      * @brief Feed system watchdog
      */
     void feed_system() noexcept {
-        last_system_feed_ = platform::get_system_time_us();
+        last_system_feed_ = os::time_us();
     }
     
     /**

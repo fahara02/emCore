@@ -1,7 +1,8 @@
 #pragma once
 
 #include "../core/types.hpp"
-#include "../platform/platform.hpp"
+#include "../os/sync.hpp"
+#include "../os/time.hpp"
 #include "../error/result.hpp"
 
 #include <etl/circular_buffer.h>
@@ -41,7 +42,7 @@ struct message_wrapper {
     message_wrapper() noexcept = default;
     
     explicit message_wrapper(MessageType* ptr, u8 prio = 0) noexcept 
-        : message_ptr(ptr), timestamp(platform::get_system_time_us()), 
+        : message_ptr(ptr), timestamp(os::time_us()), 
           priority(prio), is_valid(ptr != nullptr) {}
     
     MessageType* get() noexcept { return message_ptr; }
@@ -65,9 +66,9 @@ private:
     rtos_queue_config config_;
     
     // RTOS synchronization (platform-agnostic)
-    mutable platform::critical_section critical_section_;
-    platform::semaphore_handle_t send_semaphore_{nullptr};
-    platform::semaphore_handle_t receive_semaphore_{nullptr};
+    mutable os::critical_section critical_section_;
+    os::semaphore_handle_t send_semaphore_{nullptr};
+    os::semaphore_handle_t receive_semaphore_{nullptr};
     
     // Statistics
     u32 messages_sent_{0};
@@ -78,8 +79,8 @@ private:
 public:
     explicit rtos_message_queue(const rtos_queue_config& config = {}) noexcept 
         : config_(config),
-          send_semaphore_(platform::create_binary_semaphore()),
-          receive_semaphore_(platform::create_binary_semaphore()) {
+          send_semaphore_(os::create_binary_semaphore()),
+          receive_semaphore_(os::create_binary_semaphore()) {
     }
     
     // Rule of Five: Delete copy/move operations for RTOS resources
@@ -90,8 +91,8 @@ public:
     
     ~rtos_message_queue() noexcept {
         // Clean up platform-agnostic semaphores
-        platform::delete_semaphore(send_semaphore_);
-        platform::delete_semaphore(receive_semaphore_);
+        os::delete_semaphore(send_semaphore_);
+        os::delete_semaphore(receive_semaphore_);
     }
     
     /**
@@ -128,7 +129,7 @@ public:
         peak_queue_size_ = etl::max(peak_queue_size_, static_cast<u32>(queue_.size()));
         
         // Signal waiting receivers (platform-agnostic)
-        platform::semaphore_give(receive_semaphore_);
+        os::semaphore_give(receive_semaphore_);
         
         critical_section_.exit();
         
@@ -156,7 +157,7 @@ public:
         
         // If no message and timeout requested, wait
         if (timeout_us > 0) {
-            if (platform::semaphore_take(receive_semaphore_, timeout_us)) {
+            if (os::semaphore_take(receive_semaphore_, timeout_us)) {
                 // Try again after semaphore signal
                 critical_section_.enter();
                 if (!queue_.empty()) {
@@ -169,13 +170,13 @@ public:
                 critical_section_.exit();
             } else {
                 // Fallback: busy wait for systems without semaphore support
-                timestamp_t start = platform::get_system_time_us();
-                while ((platform::get_system_time_us() - start) < timeout_us) {
+                timestamp_t start = os::time_us();
+                while ((os::time_us() - start) < timeout_us) {
                     auto retry_result = receive_nonblocking(0); // Try again
                     if (retry_result.is_ok()) {
                         return retry_result;
                     }
-                    platform::delay_ms(1); // Small delay
+                    os::delay_ms(1); // Small delay
                 }
             }
         }
@@ -256,7 +257,7 @@ private:
     etl::array<pool_entry, PoolSize> pool_;
     size_t next_index_{0};
     
-    mutable platform::critical_section critical_section_;
+    mutable os::critical_section critical_section_;
     
 public:
     /**

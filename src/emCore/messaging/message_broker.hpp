@@ -5,7 +5,9 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include "../error/result.hpp"
-#include "../platform/platform.hpp"
+#include "../os/time.hpp"
+#include "../os/sync.hpp"
+#include "../os/tasks.hpp"
 #include "message_types.hpp"
 
 #include <etl/circular_buffer.h>
@@ -55,12 +57,15 @@ private:
     static constexpr size_t queue_capacity = config::default_mailbox_queue_capacity;
     static constexpr size_t max_topics = config::default_max_topics;
     static constexpr size_t max_subscribers_per_topic = config::default_max_subscribers_per_topic;
+    static_assert(queue_capacity >= 1, "EMCORE_MSG_QUEUE_CAPACITY must be >= 1");
+    static_assert(max_topics >= 1, "EMCORE_MSG_MAX_TOPICS must be >= 1");
+    static_assert(max_subscribers_per_topic >= 1, "EMCORE_MSG_MAX_SUBS_PER_TOPIC must be >= 1");
     
     /* Task mailbox with per-topic sub-queues (each with high/normal) */
     struct task_mailbox {
         task_id_t task_id{invalid_task_id};
-        platform::task_handle_t handle{nullptr};
-        mutable platform::critical_section critical_section;
+        os::task_handle_t handle{nullptr};
+        mutable os::critical_section critical_section;
         // Soft limit across all per-topic queues
         u16 depth_limit{static_cast<u16>(queue_capacity)};
         // Stats
@@ -71,6 +76,7 @@ private:
 
         // Compile-time per-topic capacities
         static constexpr size_t topic_slots = config::default_max_topic_queues_per_mailbox;
+        static_assert(topic_slots >= 1, "EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX must be >= 1");
         static_assert(config::default_topic_high_ratio_den != 0, "default_topic_high_ratio_den must not be zero");
         static constexpr size_t min_per_topic_total = 2;
         static constexpr size_t per_topic_total = ((queue_capacity / topic_slots) >= min_per_topic_total)
@@ -199,7 +205,7 @@ private:
             critical_section.exit();
 
             if (should_notify && handle != nullptr) {
-                platform::notify_task(handle, 0x01);
+                os::notify_task(handle, 0x01);
             }
             return ok();
         }
@@ -219,7 +225,7 @@ private:
                     received_count++;
                     bool now_empty = is_empty_unlocked();
                     critical_section.exit();
-                    if (now_empty) { platform::clear_notification(); }
+                    if (now_empty) { os::clear_notification(); }
                     return result<MessageType, error_code>(msg);
                 }
             }
@@ -231,7 +237,7 @@ private:
                     received_count++;
                     bool now_empty = is_empty_unlocked();
                     critical_section.exit();
-                    if (now_empty) { platform::clear_notification(); }
+                    if (now_empty) { os::clear_notification(); }
                     return result<MessageType, error_code>(msg);
                 }
             }
@@ -305,7 +311,7 @@ public:
     }
 
     /* Register task with mailbox */
-    result<void, error_code> register_task(task_id_t task_id, platform::task_handle_t handle = nullptr) noexcept {
+    result<void, error_code> register_task(task_id_t task_id, os::task_handle_t handle = nullptr) noexcept {
         // Ensure vector index equals task_id for O(1) lookup in find_mailbox()
         const size_t idx = static_cast<size_t>(task_id.value());
         if (idx >= MaxTasks) {
@@ -398,7 +404,7 @@ public:
         msg.header.sender_id = from_task_id.value();
         // Only set timestamp if producer hasn't set it (allows end-to-end latency measurement)
         if (msg.header.timestamp == 0) {
-            msg.header.timestamp = platform::get_system_time_us();
+            msg.header.timestamp = os::time_us();
         }
         if (msg.header.sequence_number == 0) {
             msg.header.sequence_number = sequence_++;
@@ -445,7 +451,7 @@ public:
         
         /* Wait for notification */
         u32 notification = 0;
-        if (platform::wait_notification(timeout_ms, &notification) && ((notification & 0x01) != 0)) {
+        if (os::wait_notification(timeout_ms, &notification) && ((notification & 0x01) != 0)) {
             receive_result = mailbox->receive();
             if (receive_result.is_ok()) {
                 received_count_++;

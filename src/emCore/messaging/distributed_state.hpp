@@ -3,7 +3,7 @@
 #include <cstddef>
 
 #include "../core/types.hpp"
-#include "../platform/platform.hpp"
+#include "../os/time.hpp"
 #include "message_types.hpp"
 #include "message_broker.hpp" // for Ibroker
 
@@ -34,7 +34,7 @@ public:
         const u16 seq = static_cast<u16>(local_seq_++);
         pending_info info{}; info.state = new_state; info.acks = 1; (void)pending_.insert(typename pending_map::value_type(seq, info));
         small_message msg{}; msg.header.type = ProposeTopicId; msg.header.sender_id = self_task_id_.value(); msg.header.receiver_id = 0xFFFF; msg.header.sequence_number = seq;
-        msg.header.payload_size = encode_proposal_(&msg.payload[0], seq, self_task_id_.value(), new_state); msg.header.timestamp = platform::get_system_time_us();
+        msg.header.payload_size = encode_proposal_(&msg.payload[0], seq, self_task_id_.value(), new_state); msg.header.timestamp = os::time_us();
         (void)broker_.publish(ProposeTopicId, msg, self_task_id_);
         return seq;
     }
@@ -109,7 +109,7 @@ private:
         const bool accept = guard(state_, proposed);
         if (accept) {
             small_message ack{}; ack.header.type = AckTopicId; ack.header.sender_id = self_task_id_.value(); ack.header.receiver_id = from; ack.header.sequence_number = seq;
-            ack.header.payload_size = encode_ack_(&ack.payload[0], seq, self_task_id_.value(), true); ack.header.timestamp = platform::get_system_time_us();
+            ack.header.payload_size = encode_ack_(&ack.payload[0], seq, self_task_id_.value(), true); ack.header.timestamp = os::time_us();
             (void)broker_.publish(AckTopicId, ack, self_task_id_);
         }
     }
@@ -124,7 +124,7 @@ private:
         if (info.acks >= majority) {
             state_ = info.state;
             small_message commit{}; commit.header.type = CommitTopicId; commit.header.sender_id = self_task_id_.value(); commit.header.receiver_id = 0xFFFF; commit.header.sequence_number = seq;
-            commit.header.payload_size = encode_commit_(&commit.payload[0], seq, state_); commit.header.timestamp = platform::get_system_time_us();
+            commit.header.payload_size = encode_commit_(&commit.payload[0], seq, state_); commit.header.timestamp = os::time_us();
             (void)broker_.publish(CommitTopicId, commit, self_task_id_);
             pending_.erase(iter);
         }

@@ -5,7 +5,7 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include "../error/result.hpp"
-#include "../platform/platform.hpp"
+#include "../os/tasks.hpp"
 #include <new>
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
@@ -20,6 +20,8 @@
 #include "../messaging/distributed_state.hpp"
 #include "rtos_scheduler.hpp"
 #include "watchdog.hpp"
+
+#include "../os/time.hpp"
 
 #include <etl/vector.h>
 #include <etl/algorithm.h>
@@ -68,7 +70,7 @@ struct task_control_block {
     duration_t deadline_ms{0};
     u32 run_count{0};
     task_statistics stats;
-    platform::task_handle_t native_handle{nullptr};  /* FreeRTOS/RTOS task handle */
+    os::task_handle_t native_handle{nullptr};  /* RTOS task handle */
     u32 stack_size{4096};  /* Stack size in bytes */
     bool is_native{false};  /* True if created as native RTOS task */
 };
@@ -278,7 +280,7 @@ public:
         
         
         /* Now create actual RTOS task - it will start immediately */
-        platform::task_create_params params{
+        os::task_create_params params{
             &taskmaster::native_task_trampoline,
             cfg.name,  /* Already const char* */
             cfg.stack_size.value(),
@@ -290,7 +292,7 @@ public:
             static_cast<int>(cfg.cpu_affinity.value())  /* core_id */
         };
         
-        if (!platform::create_native_task(params)) {
+        if (!os::create_native_task(params)) {
             tasks_.pop_back();  /* Remove TCB if creation failed */
             return result<task_id_t, error_code>(error_code::invalid_parameter);
         }
@@ -410,7 +412,7 @@ public:
             }
         } else {
             // No task ready to run - yield to prevent watchdog timeout
-            platform::delay_ms(1);
+            os::delay_ms(1);
         }
     }
     
@@ -435,7 +437,7 @@ public:
  
     /* Get current task ID from native handle */
     [[nodiscard]] task_id_t get_current_task_id() const noexcept {
-        auto* current_handle = platform::get_current_task_handle();
+        auto* current_handle = os::current_task();
         if (current_handle == nullptr) {
             return invalid_task_id;
         }
@@ -634,7 +636,7 @@ public:
        /* Tasks call this to wait until initialization is complete */
        void wait_until_ready() const noexcept {
         while (!tasks_ready_) {
-            platform::delay_ms(10);
+            os::delay_ms(10);
         }
     }
     /* Broadcast to all tasks */
@@ -703,7 +705,7 @@ private:
    
     
     [[nodiscard]] static timestamp_t get_current_time() noexcept {
-        return platform::get_system_time();
+        return os::time_ms();
     }
     
     task_control_block* find_task(task_id_t task_id) noexcept {
@@ -744,7 +746,7 @@ private:
                 emCore::get_global_watchdog().feed(tid);
                 emCore::task::get_global_scheduler().update_stack_usage(tid);
                 emCore::task::get_global_scheduler().adaptive_yield(tid);
-                emCore::platform::delay_ms(tcb->period_ms);
+                emCore::os::delay_ms(tcb->period_ms);
             }
         } else {
             /* Non-periodic: call once; user may implement its own loop */

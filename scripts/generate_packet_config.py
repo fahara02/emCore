@@ -62,6 +62,7 @@ def validate_packet_yaml(cfg: dict):
     else:
         seen_codes = set()
         seen_names = set()
+        max_code_val = -1
         for idx, op in enumerate(opcodes):
             if not isinstance(op, dict):
                 errors.append(f"opcodes[{idx}] must be a mapping")
@@ -82,6 +83,18 @@ def validate_packet_yaml(cfg: dict):
                     errors.append(f"Duplicate opcode value: 0x{ival:02X}")
                 else:
                     seen_codes.add(ival)
+                    if ival > max_code_val:
+                        max_code_val = ival
+
+        # If user provided opcode_space, ensure it's large enough
+        if isinstance(pkt, dict) and 'opcode_space' in pkt:
+            try:
+                space_val = int(pkt.get('opcode_space'))
+                required = (max_code_val + 1) if max_code_val >= 0 else 1
+                if space_val < required:
+                    errors.append(f"packet.opcode_space ({space_val}) must be >= max(opcodes)+1 ({required})")
+            except Exception:
+                errors.append("packet.opcode_space must be an integer if provided")
 
     if errors:
         raise ValueError("packet.yml validation failed:\n - " + "\n - ".join(errors))
@@ -147,6 +160,14 @@ def generate_packet_header(cfg: dict, out_path: Path):
     header.append("using ParserT = packet_parser<PACKET_MAX_PAYLOAD, PACKET_SYNC_LEN, PACKET_LENGTH_16BIT, PACKET_SYNC>;")
     header.append("template <size_t MaxHandlers>")
     header.append("using DispatcherT = command_dispatcher<MaxHandlers, PacketT>;")
+    header.append("")
+
+    # Compile-time safety: ensure space is sufficient
+    try:
+        required_space = int(max_code) + 1
+    except Exception:
+        required_space = 1
+    header.append(f"static_assert(OPCODE_SPACE >= {required_space}, \"OPCODE_SPACE must be >= max(opcodes)+1\");")
     header.append("")
 
     header.append("} // namespace emCore::protocol::gen")

@@ -1,7 +1,7 @@
 #pragma once
 #include "../core/types.hpp"
 #include "message_types.hpp"
-#include "../platform/platform.hpp"
+#include "../os/sync.hpp"
 #include <cstddef>
 // ---- Consolidated Zero-Copy Messaging Support ----
 namespace emCore::messaging {
@@ -81,7 +81,6 @@ namespace emCore::messaging {
         zero_copy_pool() noexcept { initialize(); }
     
         void initialize() noexcept {
-            cs_ = platform::critical_section();
             free_head_ = 0;
             for (size_t i = 0; i < BlockCount; ++i) {
                 nodes_[i].size = 0;
@@ -130,7 +129,7 @@ namespace emCore::messaging {
         [[nodiscard]] size_t capacity() const noexcept { return BlockCount; }
     
     private:
-        platform::critical_section cs_;
+        os::critical_section cs_;
         etl::array<node, BlockCount> nodes_{};
         u16 free_head_{0xFFFF};
     };

@@ -3,7 +3,6 @@
 #include <cstddef>
 
 #include "../core/types.hpp"
-#include "../platform/platform.hpp"
 #include <etl/array.h>
 
 

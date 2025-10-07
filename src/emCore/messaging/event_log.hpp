@@ -3,7 +3,7 @@
 #include <cstddef>
 
 #include "../core/types.hpp"
-#include "../platform/platform.hpp"
+#include "../os/sync.hpp"
 #include "message_types.hpp"
 
 #include <etl/array.h>
@@ -19,7 +19,7 @@ public:
     struct stats { u64 appended; u32 dropped; u32 readers; size_t used; size_t capacity; };
     event_log() noexcept { reset(); }
 
-    void reset() noexcept { cs_ = platform::critical_section(); head_ = 0; tail_ = 0; size_ = 0; next_index_ = 1; appended_ = 0; dropped_ = 0; }
+    void reset() noexcept { head_ = 0; tail_ = 0; size_ = 0; next_index_ = 1; appended_ = 0; dropped_ = 0; }
 
     u64 append(const EventT& evt) noexcept {
         cs_.enter();
@@ -56,7 +56,7 @@ public:
     [[nodiscard]] stats get_stats() const noexcept { cs_.enter(); stats sts{appended_, dropped_, 0, size_, Capacity}; cs_.exit(); return sts; }
 
 private:
-    mutable platform::critical_section cs_;
+    mutable os::critical_section cs_;
     etl::array<EventT, Capacity> buffer_{};
     etl::array<u64, Capacity> indices_{};
     size_t head_{0}; size_t tail_{0}; size_t size_{0};
