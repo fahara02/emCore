@@ -9,6 +9,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <freertos/portmacro.h>
 #include <esp_timer.h>
 #include <rom/ets_sys.h>
 
@@ -81,7 +82,19 @@ inline void clear_notification() noexcept { xTaskNotifyStateClear(nullptr); }
 using semaphore_handle_t = void*;
 inline semaphore_handle_t create_binary_semaphore() noexcept { return xSemaphoreCreateBinary(); }
 inline void delete_semaphore(semaphore_handle_t h) noexcept { if (h) vSemaphoreDelete(static_cast<SemaphoreHandle_t>(h)); }
-inline bool semaphore_give(semaphore_handle_t h) noexcept { if (!h) return false; return xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(h), nullptr) == pdTRUE; }
+inline bool semaphore_give(semaphore_handle_t h) noexcept {
+    if (!h) return false;
+    if (xPortInIsrContext()) {
+        BaseType_t hpw = pdFALSE;
+        BaseType_t r = xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(h), &hpw);
+        if (hpw == pdTRUE) {
+            portYIELD_FROM_ISR();
+        }
+        return r == pdTRUE;
+    } else {
+        return xSemaphoreGive(static_cast<SemaphoreHandle_t>(h)) == pdTRUE;
+    }
+}
 inline bool semaphore_take(semaphore_handle_t h, duration_t timeout_us) noexcept {
     if (!h) return false; TickType_t t = pdMS_TO_TICKS(timeout_us / 1000); return xSemaphoreTake(static_cast<SemaphoreHandle_t>(h), t) == pdTRUE;
 }

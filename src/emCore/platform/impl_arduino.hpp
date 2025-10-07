@@ -6,6 +6,12 @@
 #if defined(EMCORE_PLATFORM_ARDUINO) || defined(ARDUINO)
 
 #include <Arduino.h>
+#if defined(ESP32) || defined(ESP_PLATFORM)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+#include <freertos/portmacro.h>
+#endif
 #include <cstdio>
 
 namespace emCore::platform::impl_arduino {
@@ -159,7 +165,17 @@ inline void delete_semaphore(semaphore_handle_t h) noexcept {
 }
 inline bool semaphore_give(semaphore_handle_t h) noexcept {
 #if defined(ESP32) || defined(ESP_PLATFORM)
-    if (!h) return false; return xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(h), nullptr) == pdTRUE;
+    if (!h) return false;
+    if (xPortInIsrContext()) {
+        BaseType_t hpw = pdFALSE;
+        BaseType_t r = xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(h), &hpw);
+        if (hpw == pdTRUE) {
+            portYIELD_FROM_ISR();
+        }
+        return r == pdTRUE;
+    } else {
+        return xSemaphoreGive(static_cast<SemaphoreHandle_t>(h)) == pdTRUE;
+    }
 #else
     (void)h; return false;
 #endif
