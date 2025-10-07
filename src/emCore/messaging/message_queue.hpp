@@ -102,7 +102,7 @@ public:
         if (queue_.empty()) {
             return result<MessageType, error_code>(error_code::not_found);
         }
-        return result<MessageType, error_code>(queue_.top());
+        return result<MessageType, error_code>(queue_.front());
     }
     
     /* Queue status */

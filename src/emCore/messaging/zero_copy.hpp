@@ -97,7 +97,8 @@ namespace emCore::messaging {
             u16 idx = free_head_;
             free_head_ = nodes_[idx].next;
             nodes_[idx].size = size;
-            nodes_[idx].refs = 1;
+            // Do not pre-increment refs here because handle constructor will add_ref_()
+            nodes_[idx].refs = 0;
             nodes_[idx].in_use = true;
             nodes_[idx].next = 0xFFFF;
             cs_.exit();

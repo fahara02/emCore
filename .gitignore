@@ -37,4 +37,5 @@ lib/
 # External dependencies (managed by PlatformIO)
 external/etl/
 
-
+/test
+/3rdparty
