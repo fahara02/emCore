@@ -65,6 +65,10 @@ public:
     using packet_t = packet<MaxPayload>;
 
     packet_parser() = default;
+    packet_parser(const packet_parser&) = delete;
+    packet_parser& operator=(const packet_parser&) = delete;
+    packet_parser(packet_parser&&) = delete;
+    packet_parser& operator=(packet_parser&&) = delete;
 
     // Reset parser to initial state
     void reset() noexcept {
