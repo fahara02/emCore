@@ -7,8 +7,7 @@ CompileFlags:
     - -Wextra
     - -Wpedantic
     - -Isrc
-    - "-Iexternal/Embedded Template Library/include"
-    - -Iexternal/etl/include
+    - -Iexternal/ETL/include
     - -DETL_NO_STL
     - -DETL_NO_CHECKS
     - -DETL_NO_INITIALIZER_LIST
@@ -17,6 +16,11 @@ CompileFlags:
     - -DEMCORE_MAX_TASKS=16
     - -DEMCORE_MAX_EVENTS=32
     - -D__GNUC__=11
+  Remove:
+    - -mlongcalls
+    - -fno-shrink-wrap
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
 
 Diagnostics:
   UnusedIncludes: Strict

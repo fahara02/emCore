@@ -37,8 +37,6 @@ public:
     Ibroker& operator=(const Ibroker&) = delete;
     Ibroker(Ibroker&&) = delete;
     Ibroker& operator=(Ibroker&&) = delete;
-
-public:
     Ibroker() = default;
 
     virtual result<void, error_code> subscribe(topic_id_t topic_id, task_id_t subscriber_task_id) noexcept = 0;
@@ -95,6 +93,7 @@ private:
             etl::circular_buffer<MessageType, high_capacity> high_queue;
             etl::circular_buffer<MessageType, normal_capacity> normal_queue;
             topic_queue_entry() = default;
+            ~topic_queue_entry() = default;
             topic_queue_entry(const topic_queue_entry&) = delete;
             topic_queue_entry& operator=(const topic_queue_entry&) = delete;
             topic_queue_entry(topic_queue_entry&&) = delete;
@@ -104,6 +103,7 @@ private:
         etl::vector<topic_queue_entry, topic_slots> topic_queues;
 
         task_mailbox() = default;
+        ~task_mailbox() = default;
         // Custom copy semantics: do not copy per-topic queues (start empty)
         task_mailbox(const task_mailbox& other)
             : task_id(other.task_id)

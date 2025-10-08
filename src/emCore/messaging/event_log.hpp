@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 
 #include "../core/types.hpp"
 #include "../os/sync.hpp"
@@ -40,7 +41,7 @@ public:
     template <typename Fn>
     void replay_all(Fn&& func) const noexcept {
         cs_.enter(); size_t count = size_; size_t pos = head_;
-        while (count--) { const EventT& evt = buffer_[pos]; const u64 idx = indices_[pos]; cs_.exit(); func(idx, evt); cs_.enter(); pos = (pos + 1) % Capacity; }
+        while (count--) { const EventT& evt = buffer_[pos]; const u64 idx = indices_[pos]; cs_.exit(); std::forward<Fn>(func)(idx, evt); cs_.enter(); pos = (pos + 1) % Capacity; }
         cs_.exit();
     }
 
@@ -49,7 +50,7 @@ public:
         cs_.enter(); size_t count = size_; size_t pos = head_;
         while (count--) { if (indices_[pos] >= from_index) { break; } pos = (pos + 1) % Capacity; }
         size_t remaining = count + 1;
-        while (remaining--) { const EventT& evt = buffer_[pos]; const u64 idx = indices_[pos]; cs_.exit(); func(idx, evt); cs_.enter(); pos = (pos + 1) % Capacity; }
+        while (remaining--) { const EventT& evt = buffer_[pos]; const u64 idx = indices_[pos]; cs_.exit(); std::forward<Fn>(func)(idx, evt); cs_.enter(); pos = (pos + 1) % Capacity; }
         cs_.exit();
     }
 

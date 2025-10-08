@@ -31,23 +31,8 @@
     #define EMCORE_MAX_EVENTS 32
 #endif
 
-// Core library modules (types brings in etl_compat which ensures initializer_list availability)
-#include "emCore/core/types.hpp"
-#include "emCore/core/config.hpp"
-
-// ETL includes
-#include <etl/vector.h>
-#include <etl/queue.h>
-#include <etl/function.h>
-#include <etl/delegate.h>
-#include <etl/optional.h>
-#include <etl/variant.h>
-#include <etl/string.h>
-#include <etl/array.h>
+// Only include what this header directly references
 #include "emCore/task/taskmaster.hpp"
-#include "emCore/memory/pool.hpp"
-#include "emCore/event/dispatcher.hpp"
-#include "emCore/utils/helpers.hpp"
 
 /**
  * @namespace emCore

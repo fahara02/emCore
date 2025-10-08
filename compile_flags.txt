@@ -5,8 +5,7 @@
 -Wextra
 -Wpedantic
 -Isrc
--Iexternal/Embedded Template Library/include
--Iexternal/etl/include
+-Iexternal/etl
 -I.
 -DETL_NO_STL
 -DETL_NO_CHECKS

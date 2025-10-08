@@ -80,9 +80,10 @@ private:
         return static_cast<u16>(ptr - dst);
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     static bool decode_ack_(const small_message& msg, u16& seq, u16& from, bool& accept) noexcept {
         if (msg.header.payload_size < 5) { return false; }
-        const u8* payload_ptr = reinterpret_cast<const u8*>(&msg.payload[0]);
+        const u8* payload_ptr = &msg.payload[0];
         seq = static_cast<u16>(payload_ptr[0] | (static_cast<u16>(payload_ptr[1]) << 8));
         from = static_cast<u16>(payload_ptr[2] | (static_cast<u16>(payload_ptr[3]) << 8)); accept = (payload_ptr[4] != 0); return true;
     }
@@ -95,7 +96,7 @@ private:
 
     static bool decode_commit_(const small_message& msg, u16& seq, StateT& out_state) noexcept {
         if (msg.header.payload_size < (sizeof(StateT) + 2)) { return false; }
-        const u8* payload_ptr = reinterpret_cast<const u8*>(&msg.payload[0]);
+        const u8* payload_ptr = &msg.payload[0];
         seq = static_cast<u16>(payload_ptr[0] | (static_cast<u16>(payload_ptr[1]) << 8));
         u8* dst_ptr = reinterpret_cast<u8*>(&out_state); for (size_t i = 0; i < sizeof(StateT); ++i) { dst_ptr[i] = payload_ptr[2 + i]; }
         return true;

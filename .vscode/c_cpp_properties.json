@@ -4,8 +4,8 @@
             "name": "emCore",
             "includePath": [
                 "${workspaceFolder}/src",
-                "${workspaceFolder}/external/etl/include",
-                "${workspaceFolder}/external/etl/src"
+                "${workspaceFolder}/external/ETL/include",
+                "${workspaceFolder}/external/ETL/src"
             ],
             "defines": [
                 "ETL_NO_STL",
