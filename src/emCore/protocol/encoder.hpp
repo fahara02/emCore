@@ -31,6 +31,10 @@ template <size_t MaxFields, size_t OpcodeSpace = 256>
 class field_encoder {
 public:
     field_encoder() = default;
+    field_encoder(const field_encoder&) = delete;
+    field_encoder& operator=(const field_encoder&) = delete;
+    field_encoder(field_encoder&&) = delete;
+    field_encoder& operator=(field_encoder&&) = delete;
 
     // Register field layout for an opcode (same shape as decoder)
     bool set_field_layout(u8 opcode, const field_def* fields, size_t field_count) noexcept {
