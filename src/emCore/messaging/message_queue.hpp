@@ -31,6 +31,10 @@ private:
 public:
     explicit message_queue(u16 owner_id) noexcept 
         : queue_(), owner_id_(owner_id) {}
+    message_queue(const message_queue&) = delete;
+    message_queue& operator=(const message_queue&) = delete;
+    message_queue(message_queue&&) = delete;
+    message_queue& operator=(message_queue&&) = delete;
     
     
     /* Send message (non-blocking) - MPSC safe */
