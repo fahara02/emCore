@@ -94,6 +94,11 @@ private:
             u16 topic_id{0xFFFF};
             etl::circular_buffer<MessageType, high_capacity> high_queue;
             etl::circular_buffer<MessageType, normal_capacity> normal_queue;
+            topic_queue_entry() = default;
+            topic_queue_entry(const topic_queue_entry&) = delete;
+            topic_queue_entry& operator=(const topic_queue_entry&) = delete;
+            topic_queue_entry(topic_queue_entry&&) = delete;
+            topic_queue_entry& operator=(topic_queue_entry&&) = delete;
         };
 
         etl::vector<topic_queue_entry, topic_slots> topic_queues;
