@@ -16,6 +16,10 @@ public:
     static_assert(Capacity > 0, "Capacity must be > 0");
 
     constexpr byte_ring() = default;
+    byte_ring(const byte_ring&) = delete;
+    byte_ring& operator=(const byte_ring&) = delete;
+    byte_ring(byte_ring&&) = delete;
+    byte_ring& operator=(byte_ring&&) = delete;
 
     // Reset buffer indices (not thread-safe by itself)
     inline void reset() noexcept { head_ = tail_ = 0; }
