@@ -83,6 +83,10 @@ namespace emCore {
         
     public:
         event_dispatcher() noexcept = default;
+        event_dispatcher(const event_dispatcher&) = delete;
+        event_dispatcher& operator=(const event_dispatcher&) = delete;
+        event_dispatcher(event_dispatcher&&) = delete;
+        event_dispatcher& operator=(event_dispatcher&&) = delete;
         
         /**
          * @brief Initialize the event dispatcher

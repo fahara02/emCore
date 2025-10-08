@@ -24,6 +24,10 @@ class packet_pipeline {
 public:
     packet_pipeline(RingT& ring, ParserT& parser, DispatcherT& dispatcher) noexcept
         : ring_(ring), parser_(parser), dispatcher_(dispatcher) {}
+    packet_pipeline(const packet_pipeline&) = delete;
+    packet_pipeline& operator=(const packet_pipeline&) = delete;
+    packet_pipeline(packet_pipeline&&) = delete;
+    packet_pipeline& operator=(packet_pipeline&&) = delete;
 
     // Feed a byte directly to ring (driver-friendly). Returns true if stored.
     bool feed_byte(u8 byte) noexcept { return ring_.push(byte); }

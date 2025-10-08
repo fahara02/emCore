@@ -58,6 +58,10 @@ template <size_t MaxFields, size_t OpcodeSpace = 256>
 class field_decoder {
 public:
     field_decoder() = default;
+    field_decoder(const field_decoder&) = delete;
+    field_decoder& operator=(const field_decoder&) = delete;
+    field_decoder(field_decoder&&) = delete;
+    field_decoder& operator=(field_decoder&&) = delete;
     
     // Set field definitions for a specific opcode
     bool set_field_layout(u8 opcode, const field_def* fields, size_t field_count) noexcept {

@@ -113,6 +113,10 @@ private:
     
 public:
     task_watchdog() noexcept = default;
+    task_watchdog(const task_watchdog&) = delete;
+    task_watchdog& operator=(const task_watchdog&) = delete;
+    task_watchdog(task_watchdog&&) = delete;
+    task_watchdog& operator=(task_watchdog&&) = delete;
     
     /**
      * @brief Register a task with watchdog
