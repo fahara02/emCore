@@ -10,6 +10,7 @@
 #include "task_config.hpp"
 #include "../messaging/message_broker.hpp"
 #include "../messaging/message_types.hpp"
+#include "../messaging/broker_global.hpp"
 #if EMCORE_ENABLE_ZC
 #include "../messaging/zero_copy.hpp"
 #endif
@@ -23,9 +24,9 @@
 
 #include "../os/time.hpp"
 
-#include <etl/vector.h>
 #include <etl/algorithm.h>
 #include <etl/utility.h>
+#include "../messaging/broker_global.hpp"
 
 namespace emCore {
 
@@ -36,6 +37,7 @@ using messaging::small_message;
 using messaging::large_message;
 using messaging::message_priority;
 using messaging::message_flags;
+
 
 enum class task_state : u8 {
     idle,
@@ -85,8 +87,6 @@ private:
     u32 total_context_switches_{0};
     // Brokers & pools
     using medium_broker_t = messaging::message_broker<medium_message, config::max_tasks>;
-    alignas(medium_broker_t) unsigned char EMCORE_BSS_ATTR broker_storage_[sizeof(medium_broker_t)]{};
-    etl::unique_ptr<medium_broker_t, messaging::pool_deleter<medium_broker_t>> broker_{};
 
     #if EMCORE_ENABLE_SMALL_BROKER
     using small_broker_t = messaging::message_broker<small_message, config::max_tasks>;
@@ -133,9 +133,8 @@ private:
         , last_idle_time_{0}
     {
         /* Construct brokers/pools/logs in-place to avoid dynamic allocation */
-        // Medium broker
-        auto* mptr = new (static_cast<void*>(broker_storage_)) medium_broker_t();
-        broker_ = etl::unique_ptr<medium_broker_t, messaging::pool_deleter<medium_broker_t>>(mptr, messaging::pool_deleter<medium_broker_t>{nullptr});
+        // Medium broker now centralized via TLSF arena in messaging::global_medium_broker()
+        (void)messaging::global_medium_broker();
         // Small broker
         #if EMCORE_ENABLE_SMALL_BROKER
         auto* sptr = new (static_cast<void*>(small_broker_storage_)) small_broker_t();
@@ -676,7 +675,7 @@ public:
 
 public:
     // Accessors to unified messaging package
-    static messaging::Ibroker<medium_message>& broker_medium() noexcept { return *(taskmaster::instance().broker_); }
+    static messaging::Ibroker<medium_message>& broker_medium() noexcept { return messaging::global_medium_broker(); }
     #if EMCORE_ENABLE_SMALL_BROKER
     static messaging::Ibroker<small_message>&  broker_small()  noexcept { return *(taskmaster::instance().small_broker_); }
     #endif
@@ -699,7 +698,7 @@ public:
 private:
     /* Broker owned by taskmaster (constructed in ctor) */
     static messaging::message_broker<medium_message, config::max_tasks>& get_broker() noexcept {
-        return *(taskmaster::instance().broker_);
+        return messaging::global_medium_broker();
     }
 
    
