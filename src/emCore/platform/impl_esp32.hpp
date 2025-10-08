@@ -75,7 +75,8 @@ inline bool notify_task(task_handle_t h, u32 value) noexcept {
 inline bool wait_notification(u32 timeout_ms, u32* out) noexcept {
     u32 nv = 0;
     BaseType_t r = xTaskNotifyWait(0x00, 0xFFFFFFFF, &nv, pdMS_TO_TICKS(timeout_ms));
-    if (out) *out = nv; return r == pdTRUE;
+    if (out) { *out = nv; }
+    return r == pdTRUE;
 }
 inline void clear_notification() noexcept { xTaskNotifyStateClear(nullptr); }
 
@@ -96,7 +97,9 @@ inline bool semaphore_give(semaphore_handle_t h) noexcept {
     }
 }
 inline bool semaphore_take(semaphore_handle_t h, duration_t timeout_us) noexcept {
-    if (!h) return false; TickType_t t = pdMS_TO_TICKS(timeout_us / 1000); return xSemaphoreTake(static_cast<SemaphoreHandle_t>(h), t) == pdTRUE;
+    if (!h) { return false; }
+    TickType_t t = pdMS_TO_TICKS(timeout_us / 1000);
+    return xSemaphoreTake(static_cast<SemaphoreHandle_t>(h), t) == pdTRUE;
 }
 
 inline constexpr platform_info get_platform_info() noexcept { return {"ESP32", 240000000U, true}; }

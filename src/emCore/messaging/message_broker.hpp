@@ -57,7 +57,7 @@ private:
     static constexpr size_t queue_capacity = config::default_mailbox_queue_capacity;
     static constexpr size_t max_topics = config::default_max_topics;
     static constexpr size_t max_subscribers_per_topic = config::default_max_subscribers_per_topic;
-    static_assert(queue_capacity >= 1, "EMCORE_MSG_QUEUE_CAPACITY must be >= 1");
+    static_assert(queue_capacity >= 1, "EMCORE_MSG_QUEUE capacity must be >= 1");
     static_assert(max_topics >= 1, "EMCORE_MSG_MAX_TOPICS must be >= 1");
     static_assert(max_subscribers_per_topic >= 1, "EMCORE_MSG_MAX_SUBS_PER_TOPIC must be >= 1");
     
@@ -104,6 +104,32 @@ private:
         etl::vector<topic_queue_entry, topic_slots> topic_queues;
 
         task_mailbox() = default;
+        // Custom copy semantics: do not copy per-topic queues (start empty)
+        task_mailbox(const task_mailbox& other)
+            : task_id(other.task_id)
+            , handle(other.handle)
+            , critical_section()
+            , depth_limit(other.depth_limit)
+            , dropped_overflow(0)
+            , received_count(0)
+            , overflow_drop_oldest(other.overflow_drop_oldest)
+            , notify_on_empty_only(other.notify_on_empty_only)
+            , topic_queues() {}
+
+        task_mailbox& operator=(const task_mailbox& other) {
+            if (this != &other) {
+                task_id = other.task_id;
+                handle = other.handle;
+                // critical_section intentionally default-initialized per instance
+                depth_limit = other.depth_limit;
+                dropped_overflow = 0;
+                received_count = 0;
+                overflow_drop_oldest = other.overflow_drop_oldest;
+                notify_on_empty_only = other.notify_on_empty_only;
+                topic_queues.clear();
+            }
+            return *this;
+        }
 
         size_t total_size() const noexcept {
             size_t total = 0;
@@ -140,9 +166,8 @@ private:
             if (topic_queues.full()) {
                 return nullptr;
             }
-            // Construct entry in-place to avoid copying circular_buffer internals
-            const size_t new_size = topic_queues.size() + 1U;
-            topic_queues.resize(new_size);
+            // Construct entry in-place to avoid copying/moving circular_buffer internals
+            topic_queues.emplace_back();
             topic_queue_entry& back = topic_queues.back();
             back.topic_id = topic_id;
             return &back;
