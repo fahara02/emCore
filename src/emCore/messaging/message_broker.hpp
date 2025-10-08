@@ -135,10 +135,12 @@ private:
             if (topic_queues.full()) {
                 return nullptr;
             }
-            topic_queue_entry entry;
-            entry.topic_id = topic_id;
-            topic_queues.push_back(entry);
-            return &topic_queues.back();
+            // Construct entry in-place to avoid copying circular_buffer internals
+            const size_t new_size = topic_queues.size() + 1U;
+            topic_queues.resize(new_size);
+            topic_queue_entry& back = topic_queues.back();
+            back.topic_id = topic_id;
+            return &back;
         }
 
         // Drop one message to make room (prefer normal across topics)
