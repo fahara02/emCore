@@ -44,6 +44,18 @@
             "name": "ETL",
             "version": "^20.43.0",
             "platforms": "*"
+        },
+        {
+            "name": "eAlloc",
+            "platforms": "*",
+            "version": "*",
+            "repository": "https://github.com/fahara02/eAlloc"
+        },
+        {
+            "name": "Logger",
+            "platforms": "*",
+            "version": "*",
+            "repository": "https://github.com/fahara02/Logger"
         }
     ],
     "build": {

@@ -15,10 +15,14 @@
         "-Wpedantic",
         "-I${workspaceFolder}/src",
         "-I${workspaceFolder}/external/ETL/include",
+        "-I${workspaceFolder}/external/eAlloc",
+        "-I${workspaceFolder}/external/Logger/src",
         "-DETL_NO_STL",
         "-DETL_TARGET_DEVICE_GENERIC",
         "-DEMCORE_MAX_TASKS=16",
-        "-DEMCORE_MAX_EVENTS=32"
+        "-DEMCORE_MAX_EVENTS=32",
+        "-DEMCORE_MEMORY_BUDGET_BYTES=65536",
+        "-DBAREMETAL=1"
     ],
     "C_Cpp.intelliSenseEngine": "disabled",
     "files.associations": {

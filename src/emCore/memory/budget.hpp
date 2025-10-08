@@ -1,0 +1,185 @@
+#pragma once
+
+// emCore memory budget and compile-time sanity checks
+// Header-only, MCU-agnostic, no dynamic allocation, ETL-only.
+// Define the following macros in your build to control the global budget and per-subsystem caps:
+//   - EMCORE_MEMORY_BUDGET_BYTES          : total bytes available to emCore (required for enforcement)
+//   - EMCORE_MAX_TASKS                    : number of tasks (default 16)
+//   - EMCORE_MAX_EVENTS                   : event queue length (default 32)
+//   - EMCORE_MSG_QUEUE_CAPACITY           : per-mailbox total queue capacity (default 32)
+//   - EMCORE_MSG_MAX_TOPICS               : broker topics upper bound (default 8)
+//   - EMCORE_MSG_MAX_SUBS_PER_TOPIC       : max subscribers per topic (default 4)
+//   - EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX : per-mailbox topic queues (default 3)
+//   - EMCORE_MSG_OVERHEAD_BYTES           : extra constant overhead for broker tables (default 2048)
+// Optional fine-tuning knobs (set to 0 to disable):
+//   - EMCORE_TASK_MEM_BYTES               : reserved bytes for task subsystem (default 0)
+//   - EMCORE_OS_MEM_BYTES                 : reserved bytes for OS glue (default 0)
+//   - EMCORE_PROTOCOL_MEM_BYTES           : reserved bytes for protocol (default 0)
+//   - EMCORE_DIAGNOSTICS_MEM_BYTES        : reserved bytes for diagnostics (default 0)
+//   - EMCORE_EVENT_HANDLER_CAP            : number of event handlers (default EMCORE_MAX_EVENTS)
+
+#include <cstddef>
+
+#include "../event/event.hpp"
+#include "../event/event_bus.hpp"
+#include "../messaging/message_types.hpp"
+
+namespace emCore::memory {
+
+// -------- User-configured knobs with sensible defaults --------
+#ifndef EMCORE_MAX_TASKS
+#define EMCORE_MAX_TASKS 16
+#endif
+#ifndef EMCORE_MAX_EVENTS
+#define EMCORE_MAX_EVENTS 32
+#endif
+#ifndef EMCORE_MSG_QUEUE_CAPACITY
+#define EMCORE_MSG_QUEUE_CAPACITY 32
+#endif
+#ifndef EMCORE_MSG_MAX_TOPICS
+#define EMCORE_MSG_MAX_TOPICS 8
+#endif
+#ifndef EMCORE_MSG_MAX_SUBS_PER_TOPIC
+#define EMCORE_MSG_MAX_SUBS_PER_TOPIC 4
+#endif
+#ifndef EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX
+#define EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX 3
+#endif
+#ifndef EMCORE_MSG_OVERHEAD_BYTES
+#define EMCORE_MSG_OVERHEAD_BYTES 2048
+#endif
+#ifndef EMCORE_EVENT_HANDLER_CAP
+#define EMCORE_EVENT_HANDLER_CAP EMCORE_MAX_EVENTS
+#endif
+
+#ifndef EMCORE_TASK_MEM_BYTES
+#define EMCORE_TASK_MEM_BYTES 0
+#endif
+#ifndef EMCORE_OS_MEM_BYTES
+#define EMCORE_OS_MEM_BYTES 0
+#endif
+#ifndef EMCORE_PROTOCOL_MEM_BYTES
+#define EMCORE_PROTOCOL_MEM_BYTES 0
+#endif
+#ifndef EMCORE_DIAGNOSTICS_MEM_BYTES
+#define EMCORE_DIAGNOSTICS_MEM_BYTES 0
+#endif
+
+// -------- Sizes of key message/event types we actually store --------
+using message_t = ::emCore::messaging::medium_message; // broker defaults to medium_message
+using event_t   = ::emCore::events::Event;
+using handler_registration_t = ::emCore::events::handler_registration;
+
+// -------- constexpr wrappers for macro configuration (improves linting) --------
+constexpr std::size_t kMaxTasks                  = static_cast<std::size_t>(EMCORE_MAX_TASKS);
+constexpr std::size_t kMaxEvents                 = static_cast<std::size_t>(EMCORE_MAX_EVENTS);
+constexpr std::size_t kMsgQueueCapacity          = static_cast<std::size_t>(EMCORE_MSG_QUEUE_CAPACITY);
+constexpr std::size_t kMsgMaxTopics              = static_cast<std::size_t>(EMCORE_MSG_MAX_TOPICS);
+constexpr std::size_t kMsgMaxSubsPerTopic        = static_cast<std::size_t>(EMCORE_MSG_MAX_SUBS_PER_TOPIC);
+constexpr std::size_t kMsgQueuesPerMailbox       = static_cast<std::size_t>(EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX);
+constexpr std::size_t kMsgOverheadBytes          = static_cast<std::size_t>(EMCORE_MSG_OVERHEAD_BYTES);
+constexpr std::size_t kEventHandlerCap           = static_cast<std::size_t>(EMCORE_EVENT_HANDLER_CAP);
+constexpr std::size_t kTaskMemBytes              = static_cast<std::size_t>(EMCORE_TASK_MEM_BYTES);
+constexpr std::size_t kOsMemBytes                = static_cast<std::size_t>(EMCORE_OS_MEM_BYTES);
+constexpr std::size_t kProtocolMemBytes          = static_cast<std::size_t>(EMCORE_PROTOCOL_MEM_BYTES);
+constexpr std::size_t kDiagnosticsMemBytes       = static_cast<std::size_t>(EMCORE_DIAGNOSTICS_MEM_BYTES);
+
+// -------- Conservative upper-bounds for subsystem memory footprints --------
+// Messaging broker: For each task mailbox, we bound memory by total per-mailbox
+// queue capacity times message size. This safely upper-bounds high+normal shards.
+inline constexpr std::size_t per_mailbox_bytes = kMsgQueueCapacity * sizeof(message_t);
+// Add a small fixed overhead per per-mailbox topic queue entry for bookkeeping.
+inline constexpr std::size_t per_mailbox_topic_overhead = kMsgQueuesPerMailbox * 32U;
+inline constexpr std::size_t messaging_mailboxes_bytes = kMaxTasks * (per_mailbox_bytes + per_mailbox_topic_overhead);
+// Add global broker tables overhead (topics/subscribers registries, indices, etc.)
+inline constexpr std::size_t messaging_global_overhead_bytes = kMsgOverheadBytes;
+inline constexpr std::size_t messaging_total_upper = messaging_mailboxes_bytes + messaging_global_overhead_bytes;
+
+// Events: queue + handlers
+inline constexpr std::size_t event_queue_bytes   = kMaxEvents * sizeof(event_t);
+inline constexpr std::size_t event_handlers_bytes = kEventHandlerCap * sizeof(handler_registration_t);
+inline constexpr std::size_t events_total_upper  = event_queue_bytes + event_handlers_bytes;
+
+// Tasks/OS/Protocol/Diagnostics reserved blocks (user-provided, default 0)
+inline constexpr std::size_t tasks_total_upper       = kTaskMemBytes;
+inline constexpr std::size_t os_total_upper          = kOsMemBytes;
+inline constexpr std::size_t protocol_total_upper    = kProtocolMemBytes;
+inline constexpr std::size_t diagnostics_total_upper = kDiagnosticsMemBytes;
+
+// Sum all uppers
+inline constexpr std::size_t total_required_upper =
+    messaging_total_upper + events_total_upper + tasks_total_upper + os_total_upper + protocol_total_upper + diagnostics_total_upper;
+
+// -------- Budget enforcement --------
+// Require the integrator to provide a global memory budget and always enforce it.
+#ifndef EMCORE_MEMORY_BUDGET_BYTES
+#  error "EMCORE_MEMORY_BUDGET_BYTES must be defined (total bytes available to emCore). Add -DEMCORE_MEMORY_BUDGET_BYTES=<bytes> to build_flags."
+#endif
+constexpr std::size_t kBudgetBytes = static_cast<std::size_t>(EMCORE_MEMORY_BUDGET_BYTES);
+// Optional: reserve compile-time headroom for non-emCore RAM (framework/RTOS/etc.)
+#ifndef EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES
+#  define EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES 0
+#endif
+constexpr std::size_t kHeadroomBytes = static_cast<std::size_t>(EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES);
+constexpr std::size_t kEffectiveEmcoreBudget = (kBudgetBytes > kHeadroomBytes) ? (kBudgetBytes - kHeadroomBytes) : 0;
+
+static_assert(total_required_upper <= kEffectiveEmcoreBudget,
+              "emCore config exceeds effective compile-time budget (EMCORE_MEMORY_BUDGET_BYTES - EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES): lower caps or raise budget/headroom");
+
+// -------- Optional compile-time banner (preprocessor-only) --------
+// Auto-enable banner when user enforces total RAM budget to reduce flag burden.
+#if defined(EMCORE_ENFORCE_TOTAL_RAM_BUDGET) && (EMCORE_ENFORCE_TOTAL_RAM_BUDGET)
+#  if !defined(EMCORE_PRINT_BUDGET)
+#    define EMCORE_PRINT_BUDGET 1
+#  endif
+#endif
+// Or enable explicitly with: -DEMCORE_PRINT_BUDGET=1
+#if defined(EMCORE_PRINT_BUDGET) && (EMCORE_PRINT_BUDGET)
+#  ifndef EMCORE_PP_STRINGIZE
+#    define EMCORE_PP_STRINGIZE_IMPL(x) #x
+#    define EMCORE_PP_STRINGIZE(x) EMCORE_PP_STRINGIZE_IMPL(x)
+#  endif
+// We can only print macro values here (not constexpr numbers). For exact computed
+// bytes, inspect the constexprs: emCore::memory::total_required_upper and
+// emCore::memory::required_bytes (from memory/layout.hpp).
+#  pragma message ("[emCore] ===== Memory Budget (compile-time banner) =====")
+#  pragma message ("[emCore] Budget bytes (EMCORE_MEMORY_BUDGET_BYTES): " EMCORE_PP_STRINGIZE(EMCORE_MEMORY_BUDGET_BYTES))
+#  pragma message ("[emCore] Non-emCore headroom (EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES): " EMCORE_PP_STRINGIZE(EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES))
+#  pragma message ("[emCore] Max tasks (EMCORE_MAX_TASKS): " EMCORE_PP_STRINGIZE(EMCORE_MAX_TASKS))
+#  pragma message ("[emCore] Max events (EMCORE_MAX_EVENTS): " EMCORE_PP_STRINGIZE(EMCORE_MAX_EVENTS))
+#  pragma message ("[emCore] Msg queue cap (EMCORE_MSG_QUEUE_CAPACITY): " EMCORE_PP_STRINGIZE(EMCORE_MSG_QUEUE_CAPACITY))
+#  pragma message ("[emCore] Msg max topics (EMCORE_MSG_MAX_TOPICS): " EMCORE_PP_STRINGIZE(EMCORE_MSG_MAX_TOPICS))
+#  pragma message ("[emCore] Msg max subs/topic (EMCORE_MSG_MAX_SUBS_PER_TOPIC): " EMCORE_PP_STRINGIZE(EMCORE_MSG_MAX_SUBS_PER_TOPIC))
+#  pragma message ("[emCore] Msg queues/mailbox (EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX): " EMCORE_PP_STRINGIZE(EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX))
+#  pragma message ("[emCore] Msg overhead bytes (EMCORE_MSG_OVERHEAD_BYTES): " EMCORE_PP_STRINGIZE(EMCORE_MSG_OVERHEAD_BYTES))
+#  pragma message ("[emCore] Reserved (TASK/OS/PROTO/DIAG) bytes: " EMCORE_PP_STRINGIZE(EMCORE_TASK_MEM_BYTES) ", " EMCORE_PP_STRINGIZE(EMCORE_OS_MEM_BYTES) ", " EMCORE_PP_STRINGIZE(EMCORE_PROTOCOL_MEM_BYTES) ", " EMCORE_PP_STRINGIZE(EMCORE_DIAGNOSTICS_MEM_BYTES))
+#  pragma message ("[emCore] Note: Exact computed totals are constexpr: emCore::memory::total_required_upper and layout::required_bytes. Effective emCore budget = EMCORE_MEMORY_BUDGET_BYTES - EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES.")
+#  pragma message ("[emCore] ===============================================")
+
+  /* Duplicate as warnings so toolchains/PIO print them even in non-verbose mode */
+#  if defined(__GNUC__) || defined(__clang__)
+#    warning "[emCore] Memory Budget banner: EMCORE_MEMORY_BUDGET_BYTES=" EMCORE_PP_STRINGIZE(EMCORE_MEMORY_BUDGET_BYTES) \
+             ", HEADROOM=" EMCORE_PP_STRINGIZE(EMCORE_NON_EMCORE_RAM_HEADROOM_BYTES)
+#    warning "[emCore] Caps: TASKS=" EMCORE_PP_STRINGIZE(EMCORE_MAX_TASKS) \
+             ", EVENTS=" EMCORE_PP_STRINGIZE(EMCORE_MAX_EVENTS) \
+             ", QCAP=" EMCORE_PP_STRINGIZE(EMCORE_MSG_QUEUE_CAPACITY)
+#  endif
+#endif
+
+// Expose a small report for logging/test assertions
+struct budget_report {
+    std::size_t messaging_bytes;
+    std::size_t events_bytes;
+    std::size_t tasks_bytes;
+    std::size_t os_bytes;
+    std::size_t protocol_bytes;
+    std::size_t diagnostics_bytes;
+    std::size_t total_upper;
+};
+
+constexpr budget_report report() noexcept {
+    return budget_report{ messaging_total_upper, events_total_upper, tasks_total_upper, os_total_upper,
+                          protocol_total_upper, diagnostics_total_upper, total_required_upper };
+}
+
+} // namespace emCore::memory

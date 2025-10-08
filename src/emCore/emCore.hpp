@@ -33,6 +33,7 @@
 
 // Only include what this header directly references
 #include "emCore/task/taskmaster.hpp"
+#include "emCore/memory/arena_allocator.hpp"
 
 /**
  * @namespace emCore
@@ -46,6 +47,8 @@ namespace emCore {
      */
     inline bool initialize() noexcept {
         // Initialize subsystems
+        // Initialize centralized arena allocator (TLSF over OS region)
+        (void)emCore::memory::arena::ensure_initialized();
         return true;
     }
     

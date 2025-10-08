@@ -299,6 +299,10 @@ def generate_command_if_needed():
         print("⚠️  Build will continue, but generated_command_table.hpp may be missing")
 
 
+# Note: No link-time RAM budget injection here; compile-time budgeting is enforced
+# via src/emCore/memory/budget.hpp. Keep this script limited to code generation.
+
+
 # Only run generators once, not on every script load
 if not hasattr(env, '_emcore_generators_run'):
     print("🔥 emCore: Running generators NOW...")

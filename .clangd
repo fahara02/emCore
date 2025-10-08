@@ -8,6 +8,9 @@ CompileFlags:
     - -Wpedantic
     - -Isrc
     - -Iexternal/ETL/include
+    - -Iexternal/eAlloc
+    - -Iexternal/eAlloc/src
+    - -Iexternal/Logger/src
     - -DETL_NO_STL
     - -DETL_NO_CHECKS
     - -DETL_NO_INITIALIZER_LIST

@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Download ETL library if not present
+# Download ETL library if not present (only mandatory dependency)
 include(FetchContent)
 FetchContent_Declare(
     etl
@@ -32,6 +32,24 @@ target_include_directories(emCore PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/Embedded\ Template\ Library/include>
     $<INSTALL_INTERFACE:include>
 )
+
+# Optional: Fetch eAlloc (TLSF) when enabled. This keeps ETL as the only
+# mandatory dependency and makes TLSF opt-in.
+option(EMCORE_ENABLE_TLSF "Enable TLSF allocator (fetch eAlloc and expose header)" OFF)
+if(EMCORE_ENABLE_TLSF)
+    message(STATUS "emCore: TLSF enabled – fetching eAlloc…")
+    FetchContent_Declare(
+        ealloc
+        GIT_REPOSITORY https://github.com/fahara02/eAlloc.git
+        GIT_TAG        main
+        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/eAlloc
+    )
+    FetchContent_MakeAvailable(ealloc)
+    target_include_directories(emCore PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/external/eAlloc>
+    )
+    target_compile_definitions(emCore PUBLIC EMCORE_ENABLE_TLSF=1)
+endif()
 
 # Task generation from YAML - triggered when library is built
 include(cmake/GenerateTasks.cmake)
