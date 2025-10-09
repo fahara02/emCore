@@ -104,9 +104,15 @@ inline constexpr std::size_t protocol_total_upper    = (::emCore::config::enable
 
 inline constexpr std::size_t diagnostics_total_upper = (::emCore::config::enable_diagnostics ? kDiagnosticsMemBytes : 0U);
 
+// Memory pools (small/medium/large) total bytes
+inline constexpr std::size_t pools_small_bytes  = ::emCore::config::small_block_size  * ::emCore::config::small_pool_count;
+inline constexpr std::size_t pools_medium_bytes = ::emCore::config::medium_block_size * ::emCore::config::medium_pool_count;
+inline constexpr std::size_t pools_large_bytes  = ::emCore::config::large_block_size  * ::emCore::config::large_pool_count;
+inline constexpr std::size_t pools_total_upper  = (::emCore::config::enable_pools_region ? (pools_small_bytes + pools_medium_bytes + pools_large_bytes) : 0U);
+
 // Sum all uppers
 inline constexpr std::size_t total_required_upper =
-    messaging_total_upper + events_total_upper + tasks_total_upper + os_total_upper + protocol_total_upper + diagnostics_total_upper;
+    messaging_total_upper + events_total_upper + tasks_total_upper + os_total_upper + protocol_total_upper + diagnostics_total_upper + pools_total_upper;
 
 // -------- Budget enforcement --------
 // Require the integrator to provide a global memory budget and always enforce it.
@@ -172,12 +178,13 @@ struct budget_report {
     std::size_t os_bytes;
     std::size_t protocol_bytes;
     std::size_t diagnostics_bytes;
+    std::size_t pools_bytes;
     std::size_t total_upper;
 };
 
 constexpr budget_report report() noexcept {
     return budget_report{ messaging_total_upper, events_total_upper, tasks_total_upper, os_total_upper,
-                          protocol_total_upper, diagnostics_total_upper, total_required_upper };
+                          protocol_total_upper, diagnostics_total_upper, pools_total_upper, total_required_upper };
 }
 
 } // namespace emCore::memory

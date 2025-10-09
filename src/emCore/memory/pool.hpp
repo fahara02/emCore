@@ -3,6 +3,7 @@
 #include "../core/types.hpp"
 #include "../core/config.hpp"
 #include <etl/array.h>
+#include "../os/sync.hpp"
 
 namespace emCore {
     
@@ -25,13 +26,43 @@ namespace emCore {
     template<size_t BlockSize, size_t BlockCount>
     class memory_pool {
     private:
-        alignas(sizeof(void*)) u8 pool_[BlockSize * BlockCount];
+        // Ensure robust alignment for MCU/peripheral (DMA-safe) access and allow
+        // relocating pool storage via EMCORE_BSS_ATTR (e.g., PSRAM on ESP32).
+        EMCORE_BSS_ATTR alignas(std::max_align_t) u8 pool_[BlockSize * BlockCount];
         etl::array<memory_block_header, BlockCount> headers_;
+        // Indirection pointers to allow optional external backing without changing API
+        u8* pool_ptr_;
+        memory_block_header* headers_ptr_;
         memory_block_header* free_list_;
         size_t allocated_count_;
+        // Optional thread-safety
+        mutable os::critical_section cs_;
         
     public:
-        memory_pool() noexcept : free_list_(nullptr), allocated_count_(0) {
+        static_assert(BlockSize > 0, "memory_pool BlockSize must be > 0");
+        static_assert(BlockCount > 0, "memory_pool BlockCount must be > 0");
+        memory_pool() noexcept : pool_ptr_(pool_), headers_ptr_(headers_.data()), free_list_(nullptr), allocated_count_(0) {
+            initialize();
+        }
+        /**
+         * @brief Construct with external backing buffers (optional)
+         * @param external_buffer Buffer of at least BlockSize*BlockCount bytes
+         * @param external_buffer_bytes Size of external_buffer in bytes
+         * @param external_headers Array of BlockCount headers
+         * @param header_count Number of headers in external_headers
+         */
+        memory_pool(u8* external_buffer,
+                    size_t external_buffer_bytes,
+                    memory_block_header* external_headers,
+                    size_t header_count) noexcept
+            : pool_ptr_(pool_), headers_ptr_(headers_.data()), free_list_(nullptr), allocated_count_(0) {
+            // Validate and adopt external buffers if sizes match, otherwise fall back to internal storage.
+            if (external_buffer != nullptr && external_buffer_bytes >= storage_bytes()) {
+                pool_ptr_ = external_buffer;
+            }
+            if (external_headers != nullptr && header_count >= BlockCount) {
+                headers_ptr_ = external_headers;
+            }
             initialize();
         }
         
@@ -40,12 +71,12 @@ namespace emCore {
          */
         void initialize() noexcept {
             // Initialize free list
-            free_list_ = &headers_[0];
+            free_list_ = &headers_ptr_[0];
             
             for (size_t i = 0; i < BlockCount; ++i) {
-                headers_[i].size = BlockSize;
-                headers_[i].is_free = true;
-                headers_[i].next = (i < BlockCount - 1) ? &headers_[i + 1] : nullptr;
+                headers_ptr_[i].size = BlockSize;
+                headers_ptr_[i].is_free = true;
+                headers_ptr_[i].next = (i < BlockCount - 1) ? &headers_ptr_[i + 1] : nullptr;
             }
             
             allocated_count_ = 0;
@@ -57,6 +88,9 @@ namespace emCore {
          * @return Pointer to allocated memory or nullptr if failed
          */
         void* allocate(size_t size) noexcept {
+            // Optional thread-safety scope
+            struct cs_scope { os::critical_section& c; explicit cs_scope(os::critical_section& c_) : c(c_) { if (config::pools_thread_safe) c.enter(); } ~cs_scope(){ if (config::pools_thread_safe) c.exit(); } };
+            cs_scope guard(cs_);
             if (size > BlockSize || free_list_ == nullptr) {
                 return nullptr;
             }
@@ -70,8 +104,8 @@ namespace emCore {
             ++allocated_count_;
             
             // Calculate memory address from header index
-            size_t index = block - &headers_[0];
-            return &pool_[index * BlockSize];
+            size_t index = static_cast<size_t>(block - &headers_ptr_[0]);
+            return &pool_ptr_[index * BlockSize];
         }
         
         /**
@@ -86,16 +120,20 @@ namespace emCore {
             
             // Calculate block index from memory address
             u8* mem_ptr = static_cast<u8*>(ptr);
-            if (mem_ptr < pool_ || mem_ptr >= pool_ + sizeof(pool_)) {
+            if (mem_ptr < pool_ptr_ || mem_ptr >= (pool_ptr_ + storage_bytes())) {
                 return false; // Not from this pool
             }
             
-            size_t index = (mem_ptr - pool_) / BlockSize;
+            // Optional thread-safety scope
+            struct cs_scope { os::critical_section& c; explicit cs_scope(os::critical_section& c_) : c(c_) { if (config::pools_thread_safe) c.enter(); } ~cs_scope(){ if (config::pools_thread_safe) c.exit(); } };
+            cs_scope guard(cs_);
+
+            size_t index = static_cast<size_t>((mem_ptr - pool_ptr_) / BlockSize);
             if (index >= BlockCount) {
                 return false;
             }
             
-            memory_block_header* block = &headers_[index];
+            memory_block_header* block = &headers_ptr_[index];
             if (block->is_free) {
                 return false; // Double free
             }
@@ -147,6 +185,13 @@ namespace emCore {
          */
         constexpr size_t get_block_count() const noexcept {
             return BlockCount;
+        }
+
+        /**
+         * @brief Get total storage bytes occupied by this pool's data area
+         */
+        static constexpr size_t storage_bytes() noexcept {
+            return BlockSize * BlockCount;
         }
     };
     

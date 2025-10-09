@@ -76,10 +76,14 @@ private:
         static constexpr size_t topic_slots = config::default_max_topic_queues_per_mailbox;
         static_assert(topic_slots >= 1, "EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX must be >= 1");
         static_assert(config::default_topic_high_ratio_den != 0, "default_topic_high_ratio_den must not be zero");
+        static_assert(topic_slots <= queue_capacity,
+                      "Per-mailbox topic queues must be <= total mailbox queue capacity");
         static constexpr size_t min_per_topic_total = 2;
         static constexpr size_t per_topic_total = ((queue_capacity / topic_slots) >= min_per_topic_total)
                                                   ? (queue_capacity / topic_slots)
                                                   : min_per_topic_total;
+        static_assert((topic_slots * min_per_topic_total) <= queue_capacity,
+                      "Mailbox queue capacity too small for the minimum per-topic requirement (2 msgs per topic)");
         static constexpr size_t calc_high = (per_topic_total * config::default_topic_high_ratio_num)
                                             / config::default_topic_high_ratio_den;
         static constexpr size_t high_capacity = (calc_high >= 1) ? calc_high : 1;

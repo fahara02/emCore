@@ -56,6 +56,14 @@
 #define EMCORE_ENABLE_DIAGNOSTICS 0
 #endif
 
+// Pools region accounting and thread-safety toggle
+#ifndef EMCORE_ENABLE_POOLS_REGION
+#define EMCORE_ENABLE_POOLS_REGION 0
+#endif
+#ifndef EMCORE_POOLS_THREAD_SAFE
+#define EMCORE_POOLS_THREAD_SAFE 0
+#endif
+
 // Reserve sizes and bookkeeping (moved from memory/budget.hpp)
 #ifndef EMCORE_MSG_OVERHEAD_BYTES
 #define EMCORE_MSG_OVERHEAD_BYTES 2048
@@ -129,6 +137,8 @@ namespace emCore::config {
         constexpr bool enable_os_region   = (EMCORE_ENABLE_OS_REGION != 0);
         constexpr bool enable_protocol    = (EMCORE_ENABLE_PROTOCOL != 0);
         constexpr bool enable_diagnostics = (EMCORE_ENABLE_DIAGNOSTICS != 0);
+        constexpr bool enable_pools_region= (EMCORE_ENABLE_POOLS_REGION != 0);
+        constexpr bool pools_thread_safe  = (EMCORE_POOLS_THREAD_SAFE != 0);
 
         // Reserve sizes exposed as constexpr
         constexpr size_t msg_overhead_bytes         = EMCORE_MSG_OVERHEAD_BYTES;
@@ -258,4 +268,43 @@ namespace emCore::config {
             constexpr bool assert_enabled = false;
         #endif
         
+        // -------- Compile-time sanity checks for YAML/flags interrelations --------
+        static_assert(max_tasks >= 1, "EMCORE_MAX_TASKS must be >= 1");
+        static_assert(max_events >= 1, "EMCORE_MAX_EVENTS must be >= 1");
+
+        // Messaging
+        static_assert(!enable_messaging || (default_mailbox_queue_capacity >= 1),
+                      "EMCORE_MSG_QUEUE_CAPACITY must be >= 1 when messaging is enabled");
+        static_assert(!enable_messaging || (default_max_topics >= 1),
+                      "EMCORE_MSG_MAX_TOPICS must be >= 1 when messaging is enabled");
+        static_assert(!enable_messaging || (default_max_subscribers_per_topic >= 1),
+                      "EMCORE_MSG_MAX_SUBS_PER_TOPIC must be >= 1 when messaging is enabled");
+        static_assert(!enable_messaging || (default_max_subscribers_per_topic <= max_tasks),
+                      "EMCORE_MSG_MAX_SUBS_PER_TOPIC must be <= EMCORE_MAX_TASKS");
+        static_assert(!enable_messaging || (default_max_topic_queues_per_mailbox >= 1),
+                      "EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX must be >= 1 when messaging is enabled");
+        static_assert(default_topic_high_ratio_den != 0, "EMCORE_MSG_TOPIC_HIGH_RATIO_DEN must not be 0");
+        static_assert(default_topic_high_ratio_num <= default_topic_high_ratio_den,
+                      "EMCORE_MSG_TOPIC_HIGH_RATIO_NUM must be <= DEN");
+        static_assert(!enable_messaging || (default_max_topic_queues_per_mailbox <= default_mailbox_queue_capacity),
+                      "Per-mailbox topic queues should not exceed total mailbox queue capacity");
+
+        // Protocol
+        static_assert(!enable_protocol || (protocol_max_handlers >= 1),
+                      "EMCORE_PROTOCOL_MAX_HANDLERS must be >= 1 when protocol is enabled");
+        static_assert(!enable_protocol || (protocol_packet_size >= 1),
+                      "EMCORE_PROTOCOL_PACKET_SIZE must be >= 1 when protocol is enabled");
+        static_assert(!enable_protocol || (protocol_ring_size >= protocol_packet_size),
+                      "EMCORE_PROTOCOL_RING_SIZE must be >= EMCORE_PROTOCOL_PACKET_SIZE");
+
+        // Pools
+        static_assert(!enable_pools_region || (small_block_size > 0 && medium_block_size > 0 && large_block_size > 0),
+                      "Pool block sizes must be > 0 when pools region is enabled");
+        // Counts are size_t; implicitly >= 0; keep a sanity upper bound to catch wild YAML/macros
+        static_assert(!enable_pools_region || (small_pool_count <= 4096 && medium_pool_count <= 4096 && large_pool_count <= 4096),
+                      "Pool block counts unreasonably large; check EMCORE_*_pool_count defines");
+
+        // Events
+        static_assert(!enable_events || (max_events >= 1),
+                      "EMCORE_MAX_EVENTS must be >= 1 when events are enabled");
 }  // namespace emCore::config
