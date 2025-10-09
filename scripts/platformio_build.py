@@ -36,6 +36,19 @@ def ensure_pyyaml():
                 except ImportError:
                     print("❌ emCore: PyYAML installed but import still fails")
                     return False
+            else:
+                print(f"❌ emCore: pip install failed with return code {result.returncode}")
+                if result.stdout:
+                    print(f"STDOUT: {result.stdout}")
+                if result.stderr:
+                    print(f"STDERR: {result.stderr}")
+                return False
+        except subprocess.TimeoutExpired:
+            print("❌ emCore: PyYAML installation timed out")
+            return False
+        except Exception as e:
+            print(f"❌ emCore: Unexpected error installing PyYAML: {e}")
+            return False
 
 # -----------------------------
 # Pre-validation helpers
@@ -108,19 +121,6 @@ def _validate_commands_yaml_basic(yaml_path: Path) -> None:
             opcodes.add(opc)
     if errors:
         raise ValueError("commands.yaml validation failed:\n - " + "\n - ".join(errors))
-            else:
-                print(f"❌ emCore: pip install failed with return code {result.returncode}")
-                if result.stdout:
-                    print(f"STDOUT: {result.stdout}")
-                if result.stderr:
-                    print(f"STDERR: {result.stderr}")
-                return False
-        except subprocess.TimeoutExpired:
-            print("❌ emCore: PyYAML installation timed out")
-            return False
-        except Exception as e:
-            print(f"❌ emCore: Unexpected error installing PyYAML: {e}")
-            return False
 
 print("🚀 emCore: Starting task generation check...")
 print("🔥 PLATFORMIO BUILD SCRIPT IS RUNNING!")
