@@ -51,21 +51,21 @@ if(EMCORE_ENABLE_TLSF)
     target_compile_definitions(emCore PUBLIC EMCORE_ENABLE_TLSF=1)
 endif()
 
-# Task generation from YAML - triggered when library is built
-include(cmake/GenerateTasks.cmake)
+# # Task generation from YAML - triggered when library is built
+# include(cmake/GenerateTasks.cmake)
 
-# FUCK IT - JUST ALWAYS GENERATE IF TASKS.YAML EXISTS!
-message(STATUS "emCore: 🔥 CHECKING FOR TASK GENERATION...")
 
-# Look for tasks.yaml in the parent project (user's project)
-set(USER_TASKS_YAML "${CMAKE_SOURCE_DIR}/tasks.yaml")
-message(STATUS "emCore: Looking for tasks.yaml at: ${USER_TASKS_YAML}")
+# message(STATUS "emCore: 🔥 CHECKING FOR TASK GENERATION...")
 
-if(EXISTS ${USER_TASKS_YAML})
-    message(STATUS "emCore: 🚀 FOUND TASKS.YAML - GENERATING NOW!")
-    set(EMCORE_USER_TASKS_YAML ${USER_TASKS_YAML})
-    emcore_generate_tasks()
-else()
-    message(STATUS "emCore: No tasks.yaml found - skipping generation")
-    message(STATUS "  Create ${USER_TASKS_YAML} to enable automatic task generation")
-endif()
+# # Look for tasks.yaml in the parent project (user's project)
+# set(USER_TASKS_YAML "${CMAKE_SOURCE_DIR}/tasks.yaml")
+# message(STATUS "emCore: Looking for tasks.yaml at: ${USER_TASKS_YAML}")
+
+# if(EXISTS ${USER_TASKS_YAML})
+#     message(STATUS "emCore: 🚀 FOUND TASKS.YAML - GENERATING NOW!")
+#     set(EMCORE_USER_TASKS_YAML ${USER_TASKS_YAML})
+#     emcore_generate_tasks()
+# else()
+#     message(STATUS "emCore: No tasks.yaml found - skipping generation")
+#     message(STATUS "  Create ${USER_TASKS_YAML} to enable automatic task generation")
+# endif()
