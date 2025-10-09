@@ -4,6 +4,7 @@
 #include "../core/config.hpp"
 #include <etl/array.h>
 #include "../os/sync.hpp"
+#include <cstddef>
 
 namespace emCore {
     
