@@ -36,6 +36,78 @@ def ensure_pyyaml():
                 except ImportError:
                     print("❌ emCore: PyYAML installed but import still fails")
                     return False
+
+# -----------------------------
+# Pre-validation helpers
+# -----------------------------
+def _import_module(module_path: Path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(module_path.stem, str(module_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot import module at {module_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    return mod
+
+def _validate_tasks_yaml_with_generator(lib_dir: Path, yaml_path: Path) -> None:
+    mod_path = lib_dir / "scripts" / "generate_tasks.py"
+    mod = _import_module(mod_path)
+    import yaml  # type: ignore
+    with open(yaml_path, 'r', encoding='utf-8') as f:
+        cfg = yaml.safe_load(f)
+    # Raises ValueError with detailed list on failure
+    mod.validate_yaml(cfg)
+
+def _validate_packet_yaml_with_generator(lib_dir: Path, yaml_path: Path) -> None:
+    mod_path = lib_dir / "scripts" / "generate_packet_config.py"
+    mod = _import_module(mod_path)
+    import yaml  # type: ignore
+    with open(yaml_path, 'r', encoding='utf-8') as f:
+        cfg = yaml.safe_load(f)
+    mod.validate_packet_yaml(cfg)
+
+def _validate_commands_yaml_basic(yaml_path: Path) -> None:
+    import yaml  # type: ignore
+    with open(yaml_path, 'r', encoding='utf-8') as f:
+        cfg = yaml.safe_load(f) or {}
+    errors = []
+    cmds = cfg.get('commands', []) or []
+    if not isinstance(cmds, list) or not cmds:
+        errors.append("commands must be a non-empty list")
+    names = set()
+    opcodes = set()
+    def _to_int(v):
+        try:
+            if isinstance(v, int):
+                return v
+            if isinstance(v, str):
+                return int(v, 0)
+        except Exception:
+            return None
+        return None
+    for idx, c in enumerate(cmds):
+        if not isinstance(c, dict):
+            errors.append(f"commands[{idx}] must be a mapping")
+            continue
+        name = c.get('name')
+        func = c.get('function')
+        opc = _to_int(c.get('opcode'))
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"commands[{idx}].name must be non-empty string")
+        elif name in names:
+            errors.append(f"Duplicate command name: {name}")
+        else:
+            names.add(name)
+        if not isinstance(func, str) or not func.strip():
+            errors.append(f"commands[{idx}].function must be non-empty string")
+        if opc is None or opc < 0 or opc > 0xFF:
+            errors.append(f"commands[{idx}].opcode must be a byte (int or 0xNN string)")
+        elif opc in opcodes:
+            errors.append(f"Duplicate command opcode value: 0x{opc:02X}")
+        else:
+            opcodes.add(opc)
+    if errors:
+        raise ValueError("commands.yaml validation failed:\n - " + "\n - ".join(errors))
             else:
                 print(f"❌ emCore: pip install failed with return code {result.returncode}")
                 if result.stdout:
@@ -414,13 +486,6 @@ def generate_tasks_if_needed():
     print("🚀 emCore: GENERATING TASK CONFIGURATION...")
     print("=" * 60)
     
-    # Find the emCore library directory
-    # In PlatformIO context, __file__ might not be available
-    lib_dir = _resolve_lib_dir(project_dir)
-    if not lib_dir:
-        print("❌ emCore ERROR: Could not find library directory")
-        return
-    
     print(f"📂 emCore library directory: {lib_dir}")
     
     generator_script = lib_dir / "scripts" / "generate_tasks.py"
@@ -509,25 +574,11 @@ def generate_packet_if_needed():
             packet_yaml = merged_packet_yaml
             print(f"🧩 emCore: Using merged packet YAML ({packet_yaml}) with {len(merged_obj['opcodes'])} opcodes")
         else:
-            # Fallback to legacy detection
-            packet_yaml = project_dir / "packet.yml"
-            if not packet_yaml.exists():
-                alt = project_dir / "test" / "packet.yml"
-                if alt.exists():
-                    packet_yaml = alt
-                else:
-                    print("📝 emCore: No packet.yml found, skipping packet generation")
-                    return
+            print("📝 emCore: Failed to write merged packet YAML; skipping packet generation")
+            return
     else:
-        # Fallback to legacy detection
-        packet_yaml = project_dir / "packet.yml"
-        if not packet_yaml.exists():
-            alt = project_dir / "test" / "packet.yml"
-            if alt.exists():
-                packet_yaml = alt
-            else:
-                print("📝 emCore: No packet.yml found, skipping packet generation")
-                return
+        print("📝 emCore: No YAML found to aggregate for packet under candidate roots; skipping packet generation")
+        return
 
     # Resolve library dir and generator script
     lib_dir = _resolve_lib_dir(project_dir)
@@ -542,6 +593,17 @@ def generate_packet_if_needed():
 
     # Expected output in USER PROJECT SPACE
     generated_header = project_dir / "include" / "generated_packet_config.hpp"
+
+    # Validate before generation
+    try:
+        print("🔎 emCore: Validating packet YAML...")
+        _validate_packet_yaml_with_generator(lib_dir, packet_yaml)
+        print("✅ emCore: Packet YAML is valid")
+    except Exception as ve:
+        print("❌ emCore: Packet YAML validation failed")
+        print(str(ve))
+        print("⛔ Skipping packet generation due to validation errors")
+        return
 
     print("=" * 60)
     print("🚀 emCore: GENERATING PACKET CONFIGURATION...")
@@ -611,25 +673,11 @@ def generate_command_if_needed():
             commands_yaml = merged_commands_yaml
             print(f"🧩 emCore: Using merged commands YAML ({commands_yaml}) with {len(merged_obj['commands'])} commands")
         else:
-            # Fallback to legacy detection
-            commands_yaml = project_dir / "commands.yaml"
-            if not commands_yaml.exists():
-                alt = project_dir / "test" / "commands.yaml"
-                if alt.exists():
-                    commands_yaml = alt
-                else:
-                    print("📝 emCore: No commands.yaml found, skipping command table generation")
-                    return
+            print("📝 emCore: Failed to write merged commands YAML; skipping command table generation")
+            return
     else:
-        # Fallback to legacy detection
-        commands_yaml = project_dir / "commands.yaml"
-        if not commands_yaml.exists():
-            alt = project_dir / "test" / "commands.yaml"
-            if alt.exists():
-                commands_yaml = alt
-            else:
-                print("📝 emCore: No commands.yaml found, skipping command table generation")
-                return
+        print("📝 emCore: No YAML found to aggregate for commands under candidate roots; skipping command table generation")
+        return
 
     # Resolve library dir and generator script
     lib_dir = _resolve_lib_dir(project_dir)
@@ -644,6 +692,17 @@ def generate_command_if_needed():
 
     # Expected output in USER PROJECT SPACE
     generated_header = project_dir / "include" / "generated_command_table.hpp"
+
+    # Validate before generation
+    try:
+        print("🔎 emCore: Validating commands YAML...")
+        _validate_commands_yaml_basic(commands_yaml)
+        print("✅ emCore: Commands YAML is valid")
+    except Exception as ve:
+        print("❌ emCore: Commands YAML validation failed")
+        print(str(ve))
+        print("⛔ Skipping command table generation due to validation errors")
+        return
 
     print("=" * 60)
     print("🚀 emCore: GENERATING COMMAND TABLE...")
