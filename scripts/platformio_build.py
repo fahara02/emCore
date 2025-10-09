@@ -435,46 +435,40 @@ def generate_tasks_if_needed():
     # Get the project directory (where user's platformio.ini is)
     project_dir = Path(env.get("PROJECT_DIR"))
     
-    # Try aggregated YAML first
+    # Aggregate YAML strictly (no legacy fallbacks)
     merged_dir = project_dir / ".pio" / "emcore"
     merged_tasks_yaml = merged_dir / "merged_tasks.yaml"
     aggregated = _aggregate_yaml(project_dir)[0]
-    if aggregated is not None:
-        # Only keep reserved keys
-        merged_obj = {
-            'tasks': aggregated.get('tasks', []),
-            'messages': aggregated.get('messages', []),
-            'channels': aggregated.get('channels', []),
-            'messaging': aggregated.get('messaging', {}),
-        }
-        if _write_merged_yaml(merged_obj, merged_tasks_yaml):
-            tasks_yaml = merged_tasks_yaml
-            generated_file = project_dir / "include" / "generated_tasks.hpp"
-            print(f"🧩 emCore: Using merged tasks YAML ({tasks_yaml}) with {len(merged_obj['tasks'])} tasks, {len(merged_obj['channels'])} channels")
-        else:
-            # Fallback to legacy detection
-            tasks_yaml = project_dir / "tasks.yaml"
-            generated_file = project_dir / "include" / "generated_tasks.hpp"
-            if not tasks_yaml.exists():
-                alt = project_dir / "test" / "tasks.yaml"
-                if alt.exists():
-                    tasks_yaml = alt
-                    generated_file = project_dir / "test" / "src" / "generated_tasks.hpp"
-                else:
-                    print("📝 emCore: No tasks.yaml found (root or test/), skipping task generation")
-                    return
-    else:
-        # Fallback to legacy detection
-        tasks_yaml = project_dir / "tasks.yaml"
-        generated_file = project_dir / "include" / "generated_tasks.hpp"
-        if not tasks_yaml.exists():
-            alt = project_dir / "test" / "tasks.yaml"
-            if alt.exists():
-                tasks_yaml = alt
-                generated_file = project_dir / "test" / "src" / "generated_tasks.hpp"
-            else:
-                print("📝 emCore: No tasks.yaml found (root or test/), skipping task generation")
-                return
+    if aggregated is None:
+        print("📝 emCore: No YAML found to aggregate for tasks under candidate roots; skipping task generation")
+        return
+    merged_obj = {
+        'tasks': aggregated.get('tasks', []),
+        'messages': aggregated.get('messages', []),
+        'channels': aggregated.get('channels', []),
+        'messaging': aggregated.get('messaging', {}),
+    }
+    if not _write_merged_yaml(merged_obj, merged_tasks_yaml):
+        print("📝 emCore: Failed to write merged tasks YAML; skipping task generation")
+        return
+    tasks_yaml = merged_tasks_yaml
+    generated_file = project_dir / "include" / "generated_tasks.hpp"
+    print(f"🧩 emCore: Using merged tasks YAML ({tasks_yaml}) with {len(merged_obj['tasks'])} tasks, {len(merged_obj['channels'])} channels")
+
+    # Validate before generation and resolve library dir
+    lib_dir = _resolve_lib_dir(project_dir)
+    if not lib_dir:
+        print("❌ emCore ERROR: Could not find library directory")
+        return
+    try:
+        print("🔎 emCore: Validating tasks YAML...")
+        _validate_tasks_yaml_with_generator(lib_dir, tasks_yaml)
+        print("✅ emCore: Tasks YAML is valid")
+    except Exception as ve:
+        print("❌ emCore: Tasks YAML validation failed")
+        print(str(ve))
+        print("⛔ Skipping task generation due to validation errors")
+        return
     
     # Force touch the YAML file to ensure proper timestamp detection
     tasks_yaml.touch(exist_ok=True)
