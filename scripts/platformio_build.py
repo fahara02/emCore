@@ -56,47 +56,130 @@ print(f"🔥 PROJECT_DIR: {env.get('PROJECT_DIR')}")
 print(f"🔥 BUILD_DIR: {env.get('BUILD_DIR')}")
 
 # -----------------------------
-# YAML scanning & aggregation
+# YAML discovery & aggregation
 # -----------------------------
-def _list_yaml_files(project_dir: Path):
-    """Recursively list all .yaml/.yml files in the user's project directory."""
-    files = []
+
+def _candidate_roots(project_dir: Path) -> list[Path]:
+    """Determine YAML search roots.
+
+    Rules:
+    - Always include the project root (same level as platformio.ini / .git / src)
+    - Include well-known config dir names directly under the project root: 
+      config, configs, setting, settings, cfg, conf, yaml, yml
+    - Do NOT include test/ by default (tests should not feed production config)
+    - Allow overrides/additions via EMCORE_YAML_DIRS (pathsep-separated)
+    """
+    roots = []
     try:
-        files.extend(project_dir.rglob("*.yaml"))
-        files.extend(project_dir.rglob("*.yml"))
+        roots.append(project_dir.resolve())
     except Exception:
-        pass
-    # Deduplicate while preserving order
+        roots.append(project_dir)
+
+    for name in ("config", "configs", "setting", "settings", "cfg", "conf", "yaml", "yml"):
+        p = project_dir / name
+        try:
+            if p.exists() and p.is_dir():
+                roots.append(p.resolve())
+        except Exception:
+            continue
+
+    extra = os.environ.get("EMCORE_YAML_DIRS", "")
+    if extra:
+        for raw in extra.split(os.pathsep):
+            p = Path(raw.strip())
+            if not p:
+                continue
+            try:
+                if p.exists() and p.is_dir():
+                    roots.append(p.resolve())
+            except Exception:
+                continue
+
+    # Dedup while preserving order
     seen = set()
-    out = []
-    for p in files:
-        if p.is_file():
-            s = str(p.resolve())
-            if s not in seen:
-                seen.add(s)
-                out.append(p)
-    return out
+    uniq_roots = []
+    for r in roots:
+        s = str(r)
+        if s not in seen:
+            seen.add(s)
+            uniq_roots.append(r)
+    return uniq_roots
+
+
+def _list_yaml_files(project_dir: Path):
+    """Walk candidate roots and collect any *.yml/*.yaml, excluding build/vendor dirs and merged outputs."""
+    exclude_dir_names = {
+        ".pio", "libdeps", ".git", ".svn", ".hg", ".vscode", ".idea", ".cache", ".vs",
+        "build", "cmake", "out", "dist", "node_modules", "external", "third_party",
+    }
+    merged_file_names = {"merged_tasks.yaml", "merged_packet.yml", "merged_commands.yaml"}
+
+    results = []
+    seen_paths = set()
+    for root in _candidate_roots(project_dir):
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                # prune excluded directories in-place
+                pruned = []
+                for d in list(dirnames):
+                    dn = d.lower()
+                    if dn in exclude_dir_names or dn.startswith("cmake-build"):
+                        pruned.append(d)
+                for d in pruned:
+                    try:
+                        dirnames.remove(d)
+                    except ValueError:
+                        pass
+
+                for fn in filenames:
+                    if not (fn.endswith(".yaml") or fn.endswith(".yml")):
+                        continue
+                    if fn in merged_file_names:
+                        continue
+                    p = Path(dirpath) / fn
+                    # Exclude anything under project .pio/emcore to avoid re-reading our merged outputs
+                    try:
+                        rel = p.resolve().relative_to(project_dir.resolve())
+                        if str(rel).startswith(".pio/emcore/"):
+                            continue
+                    except Exception:
+                        pass
+                    sp = str(p.resolve())
+                    if sp not in seen_paths:
+                        seen_paths.add(sp)
+                        results.append(p.resolve())
+        except Exception:
+            continue
+    return results
 
 def _aggregate_yaml(project_dir: Path):
-    """Aggregate reserved YAML sections across all YAML files.
+    """Aggregate reserved YAML sections across user YAMLs with deduplication by name.
 
-    Returns a tuple of (tasks_cfg, packet_cfg, commands_cfg) where each element is either a dict
-    with the reserved keys or None if nothing was found.
+    Returns (tasks_cfg, packet_cfg, commands_cfg) or (None, None, None) if nothing found.
+    - Last writer wins on duplicate names within the scoped set of user YAMLs.
+    - Only root and test YAMLs are considered; .pio/libdeps/templates are ignored.
     """
-    # Ensure PyYAML is importable (should be after ensure_pyyaml())
     try:
         import yaml  # type: ignore
     except Exception:
         print("⚠️  emCore: PyYAML unavailable; skipping aggregation")
         return None, None, None
 
-    tasks_cfg = { 'tasks': [], 'messages': [], 'channels': [], 'messaging': {} }
-    packet_cfg = { 'packet': {}, 'opcodes': [] }
-    commands_cfg = { 'commands': [], 'config': {} }
+    # Indexed maps for dedupe (preserve insertion order)
+    tasks_by_name = {}
+    messages_by_name = {}
+    channels_by_name = {}
+    messaging_cfg = {}
 
-    found_any_tasks = False
-    found_any_packet = False
-    found_any_commands = False
+    packet_root = {}
+    opcodes_by_name = {}
+
+    commands_by_name = {}
+    commands_config = {}
+
+    found_tasks = False
+    found_packet = False
+    found_commands = False
 
     for yf in _list_yaml_files(project_dir):
         try:
@@ -107,41 +190,87 @@ def _aggregate_yaml(project_dir: Path):
         if not isinstance(data, dict):
             continue
 
-        # Aggregate tasks/messages/channels/messaging
+        # Tasks/messages/channels/messaging
         if isinstance(data.get('tasks'), list) and data['tasks']:
-            tasks_cfg['tasks'].extend([t for t in data['tasks'] if isinstance(t, dict)])
-            found_any_tasks = True
+            for t in data['tasks']:
+                if isinstance(t, dict):
+                    name = t.get('name')
+                    if isinstance(name, str) and name:
+                        tasks_by_name[name] = t  # last writer wins
+                        found_tasks = True
         if isinstance(data.get('messages'), list) and data['messages']:
-            tasks_cfg['messages'].extend([m for m in data['messages'] if isinstance(m, dict)])
-            found_any_tasks = True
+            for m in data['messages']:
+                if isinstance(m, dict):
+                    name = m.get('name')
+                    if isinstance(name, str) and name:
+                        messages_by_name[name] = m
+                        found_tasks = True
         if isinstance(data.get('channels'), list) and data['channels']:
-            tasks_cfg['channels'].extend([c for c in data['channels'] if isinstance(c, dict)])
-            found_any_tasks = True
+            for c in data['channels']:
+                if isinstance(c, dict):
+                    name = c.get('name')
+                    if isinstance(name, str) and name:
+                        channels_by_name[name] = c
+                        found_tasks = True
         if isinstance(data.get('messaging'), dict) and data['messaging']:
-            # Shallow update (last writer wins) for scalar YAML-wide messaging knobs
-            tasks_cfg['messaging'].update({ k:v for k,v in data['messaging'].items() if v is not None })
-            found_any_tasks = True
+            # shallow merge
+            for k, v in data['messaging'].items():
+                if v is not None:
+                    messaging_cfg[k] = v
+            found_tasks = True
 
-        # Aggregate packet/opcodes
+        # Packet/opcodes
         if isinstance(data.get('packet'), dict) and data['packet']:
-            # Last writer wins for per-project packet root
-            packet_cfg['packet'].update({ k:v for k,v in data['packet'].items() if v is not None })
-            found_any_packet = True
+            for k, v in data['packet'].items():
+                if v is not None:
+                    packet_root[k] = v
+            found_packet = True
         if isinstance(data.get('opcodes'), list) and data['opcodes']:
-            packet_cfg['opcodes'].extend([op for op in data['opcodes'] if isinstance(op, dict)])
-            found_any_packet = True
+            for op in data['opcodes']:
+                if isinstance(op, dict):
+                    name = op.get('name')
+                    if isinstance(name, str) and name:
+                        opcodes_by_name[name] = op
+                        found_packet = True
 
-        # Aggregate commands/config
+        # Commands/config
         if isinstance(data.get('commands'), list) and data['commands']:
-            commands_cfg['commands'].extend([cm for cm in data['commands'] if isinstance(cm, dict)])
-            found_any_commands = True
+            for cm in data['commands']:
+                if isinstance(cm, dict):
+                    name = cm.get('name')
+                    if isinstance(name, str) and name:
+                        commands_by_name[name] = cm
+                        found_commands = True
         if isinstance(data.get('config'), dict) and data['config']:
-            commands_cfg['config'].update({ k:v for k,v in data['config'].items() if v is not None })
-            found_any_commands = True
+            for k, v in data['config'].items():
+                if v is not None:
+                    commands_config[k] = v
+            found_commands = True
 
-    return (tasks_cfg if found_any_tasks else None,
-            packet_cfg if found_any_packet else None,
-            commands_cfg if found_any_commands else None)
+    tasks_cfg = None
+    if found_tasks:
+        tasks_cfg = {
+            'tasks': list(tasks_by_name.values()),
+            'messages': list(messages_by_name.values()),
+            'channels': list(channels_by_name.values()),
+            'messaging': messaging_cfg,
+        }
+
+    packet_cfg = None
+    if found_packet:
+        packet_cfg = {
+            'packet': packet_root,
+            'opcodes': list(opcodes_by_name.values()),
+        }
+
+    commands_cfg = None
+    if found_commands:
+        commands_cfg = {
+            'commands': list(commands_by_name.values()),
+            'config': commands_config,
+        }
+
+    return tasks_cfg, packet_cfg, commands_cfg
 
 def _write_merged_yaml(cfg: dict, out_path: Path) -> bool:
     try:
