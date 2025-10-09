@@ -5,6 +5,8 @@
 #include "../core/config.hpp"
 #include "../platform/platform.hpp"
 #include "profiler.hpp"
+#include "../memory/layout.hpp"
+#include "../runtime.hpp"
 
 #include <etl/vector.h>
 #include <cstddef>
@@ -362,8 +364,20 @@ public:
  * @brief Global health monitor instance
  */
 inline health_monitor& get_global_health_monitor() noexcept {
-    static health_monitor monitor;
-    return monitor;
+    if constexpr (emCore::memory::kLayout.diagnostics.size >= sizeof(health_monitor)) {
+        static bool constructed = false;
+        void* base = emCore::runtime::diagnostics_region();
+        auto* obj = static_cast<health_monitor*>(base);
+        if (!constructed) {
+            static_assert(alignof(health_monitor) <= 8, "health_monitor alignment must be <= arena alignment");
+            ::new (obj) health_monitor();
+            constructed = true;
+        }
+        return *obj;
+    } else {
+        static health_monitor fallback;
+        return fallback;
+    }
 }
 
 } // namespace emCore::diagnostics

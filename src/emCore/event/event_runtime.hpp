@@ -6,6 +6,7 @@
 #include "event.hpp"
 #include "event_bus.hpp"
 #include "event_types.hpp"
+#include "events_global.hpp"
 
 #if defined(__has_include)
   #if __has_include(<emCore/generated/event_config.hpp>)
@@ -22,9 +23,7 @@ namespace emCore::events::runtime {
 
 // Global event bus
 inline event_bus& bus() noexcept {
-    static event_bus global_bus;
-    static bool inited = global_bus.initialize(); (void)inited;
-    return global_bus;
+    return ::emCore::events::global_event_bus();
 }
 
 // Post helpers

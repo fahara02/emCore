@@ -17,53 +17,23 @@
 //   - EMCORE_PROTOCOL_MEM_BYTES           : reserved bytes for protocol (default 0)
 //   - EMCORE_DIAGNOSTICS_MEM_BYTES        : reserved bytes for diagnostics (default 0)
 //   - EMCORE_EVENT_HANDLER_CAP            : number of event handlers (default EMCORE_MAX_EVENTS)
+// Additional sizing knobs used to compute a compile-time minimum for tasks region:
+//   - EMCORE_TASK_PER_TCB_BYTES           : approx bytes per task bookkeeping (default 256)
+//   - EMCORE_TASK_FIXED_OVERHEAD_BYTES    : fixed bytes for taskmaster bookkeeping (default 512)
+//   - EMCORE_TASK_MAILBOX_REF_BYTES       : per-task per-queue ref bytes (default 8)
 
 #include <cstddef>
 
 #include "../event/event.hpp"
 #include "../event/event_bus.hpp"
 #include "../messaging/message_types.hpp"
+#include "../core/config.hpp"
+
+// YAML-generated messaging caps (if any) are already imported by core/config.hpp.
 
 namespace emCore::memory {
 
-// -------- User-configured knobs with sensible defaults --------
-#ifndef EMCORE_MAX_TASKS
-#define EMCORE_MAX_TASKS 16
-#endif
-#ifndef EMCORE_MAX_EVENTS
-#define EMCORE_MAX_EVENTS 32
-#endif
-#ifndef EMCORE_MSG_QUEUE_CAPACITY
-#define EMCORE_MSG_QUEUE_CAPACITY 32
-#endif
-#ifndef EMCORE_MSG_MAX_TOPICS
-#define EMCORE_MSG_MAX_TOPICS 8
-#endif
-#ifndef EMCORE_MSG_MAX_SUBS_PER_TOPIC
-#define EMCORE_MSG_MAX_SUBS_PER_TOPIC 4
-#endif
-#ifndef EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX
-#define EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX 3
-#endif
-#ifndef EMCORE_MSG_OVERHEAD_BYTES
-#define EMCORE_MSG_OVERHEAD_BYTES 2048
-#endif
-#ifndef EMCORE_EVENT_HANDLER_CAP
-#define EMCORE_EVENT_HANDLER_CAP EMCORE_MAX_EVENTS
-#endif
-
-#ifndef EMCORE_TASK_MEM_BYTES
-#define EMCORE_TASK_MEM_BYTES 0
-#endif
-#ifndef EMCORE_OS_MEM_BYTES
-#define EMCORE_OS_MEM_BYTES 0
-#endif
-#ifndef EMCORE_PROTOCOL_MEM_BYTES
-#define EMCORE_PROTOCOL_MEM_BYTES 0
-#endif
-#ifndef EMCORE_DIAGNOSTICS_MEM_BYTES
-#define EMCORE_DIAGNOSTICS_MEM_BYTES 0
-#endif
+// All configuration is sourced from emCore/core/config.hpp.
 
 // -------- Sizes of key message/event types we actually store --------
 using message_t = ::emCore::messaging::medium_message; // broker defaults to medium_message
@@ -71,18 +41,18 @@ using event_t   = ::emCore::events::Event;
 using handler_registration_t = ::emCore::events::handler_registration;
 
 // -------- constexpr wrappers for macro configuration (improves linting) --------
-constexpr std::size_t kMaxTasks                  = static_cast<std::size_t>(EMCORE_MAX_TASKS);
-constexpr std::size_t kMaxEvents                 = static_cast<std::size_t>(EMCORE_MAX_EVENTS);
-constexpr std::size_t kMsgQueueCapacity          = static_cast<std::size_t>(EMCORE_MSG_QUEUE_CAPACITY);
-constexpr std::size_t kMsgMaxTopics              = static_cast<std::size_t>(EMCORE_MSG_MAX_TOPICS);
-constexpr std::size_t kMsgMaxSubsPerTopic        = static_cast<std::size_t>(EMCORE_MSG_MAX_SUBS_PER_TOPIC);
-constexpr std::size_t kMsgQueuesPerMailbox       = static_cast<std::size_t>(EMCORE_MSG_TOPIC_QUEUES_PER_MAILBOX);
-constexpr std::size_t kMsgOverheadBytes          = static_cast<std::size_t>(EMCORE_MSG_OVERHEAD_BYTES);
-constexpr std::size_t kEventHandlerCap           = static_cast<std::size_t>(EMCORE_EVENT_HANDLER_CAP);
-constexpr std::size_t kTaskMemBytes              = static_cast<std::size_t>(EMCORE_TASK_MEM_BYTES);
-constexpr std::size_t kOsMemBytes                = static_cast<std::size_t>(EMCORE_OS_MEM_BYTES);
-constexpr std::size_t kProtocolMemBytes          = static_cast<std::size_t>(EMCORE_PROTOCOL_MEM_BYTES);
-constexpr std::size_t kDiagnosticsMemBytes       = static_cast<std::size_t>(EMCORE_DIAGNOSTICS_MEM_BYTES);
+constexpr std::size_t kMaxTasks                  = ::emCore::config::max_tasks;
+constexpr std::size_t kMaxEvents                 = ::emCore::config::max_events;
+constexpr std::size_t kMsgQueueCapacity          = ::emCore::config::default_mailbox_queue_capacity;
+constexpr std::size_t kMsgMaxTopics              = ::emCore::config::default_max_topics;
+constexpr std::size_t kMsgMaxSubsPerTopic        = ::emCore::config::default_max_subscribers_per_topic;
+constexpr std::size_t kMsgQueuesPerMailbox       = ::emCore::config::default_max_topic_queues_per_mailbox;
+constexpr std::size_t kMsgOverheadBytes          = ::emCore::config::msg_overhead_bytes;
+constexpr std::size_t kEventHandlerCap           = ::emCore::config::max_event_handlers;
+constexpr std::size_t kTaskMemBytes              = ::emCore::config::task_mem_bytes;
+constexpr std::size_t kOsMemBytes                = ::emCore::config::os_mem_bytes;
+constexpr std::size_t kProtocolMemBytes          = ::emCore::config::protocol_mem_bytes;
+constexpr std::size_t kDiagnosticsMemBytes       = ::emCore::config::diagnostics_mem_bytes;
 
 // -------- Conservative upper-bounds for subsystem memory footprints --------
 // Messaging broker: For each task mailbox, we bound memory by total per-mailbox
@@ -93,18 +63,46 @@ inline constexpr std::size_t per_mailbox_topic_overhead = kMsgQueuesPerMailbox *
 inline constexpr std::size_t messaging_mailboxes_bytes = kMaxTasks * (per_mailbox_bytes + per_mailbox_topic_overhead);
 // Add global broker tables overhead (topics/subscribers registries, indices, etc.)
 inline constexpr std::size_t messaging_global_overhead_bytes = kMsgOverheadBytes;
-inline constexpr std::size_t messaging_total_upper = messaging_mailboxes_bytes + messaging_global_overhead_bytes;
+inline constexpr std::size_t messaging_total_upper =
+    (::emCore::config::enable_messaging ? (messaging_mailboxes_bytes + messaging_global_overhead_bytes) : 0U);
 
 // Events: queue + handlers
-inline constexpr std::size_t event_queue_bytes   = kMaxEvents * sizeof(event_t);
-inline constexpr std::size_t event_handlers_bytes = kEventHandlerCap * sizeof(handler_registration_t);
+inline constexpr std::size_t event_queue_bytes   =
+    (::emCore::config::enable_events ? (kMaxEvents * sizeof(event_t)) : 0U);
+inline constexpr std::size_t event_handlers_bytes =
+    (::emCore::config::enable_events ? (kEventHandlerCap * sizeof(handler_registration_t)) : 0U);
 inline constexpr std::size_t events_total_upper  = event_queue_bytes + event_handlers_bytes;
 
-// Tasks/OS/Protocol/Diagnostics reserved blocks (user-provided, default 0)
-inline constexpr std::size_t tasks_total_upper       = kTaskMemBytes;
-inline constexpr std::size_t os_total_upper          = kOsMemBytes;
-inline constexpr std::size_t protocol_total_upper    = kProtocolMemBytes;
-inline constexpr std::size_t diagnostics_total_upper = kDiagnosticsMemBytes;
+// Tasks/OS/Protocol/Diagnostics reserved blocks
+// Compute a compile-time minimum for the tasks region without including taskmaster.hpp (avoid cycles).
+// MIN = fixed overhead + per-task bookkeeping + lightweight mailbox refs per queue.
+inline constexpr std::size_t kTaskPerTcbBytes         = ::emCore::config::task_per_tcb_bytes;
+inline constexpr std::size_t kTaskFixedOverheadBytes  = ::emCore::config::task_fixed_overhead_bytes;
+inline constexpr std::size_t kTaskMailboxRefBytes     = ::emCore::config::task_mailbox_ref_bytes;
+inline constexpr std::size_t kPerTaskBookkeepingBytes = kTaskPerTcbBytes + (kMsgQueuesPerMailbox * kTaskMailboxRefBytes);
+inline constexpr std::size_t kTaskMemBytesMin         = kTaskFixedOverheadBytes + (kMaxTasks * kPerTaskBookkeepingBytes);
+
+inline constexpr std::size_t kTaskMemBytesEffective   = (kTaskMemBytes > 0) ? kTaskMemBytes : kTaskMemBytesMin;
+inline constexpr std::size_t tasks_total_upper        = (::emCore::config::enable_tasks_region ? kTaskMemBytesEffective : 0U);
+static_assert(!::emCore::config::enable_tasks_region || (kTaskMemBytesEffective >= kTaskMemBytesMin),
+              "EMCORE_TASK_MEM_BYTES is below the computed minimum for current caps; either raise EMCORE_TASK_MEM_BYTES,"
+              " lower EMCORE_MAX_TASKS/MSG caps, or adjust EMCORE_TASK_PER_TCB_BYTES/EMCORE_TASK_FIXED_OVERHEAD_BYTES.");
+
+inline constexpr std::size_t os_total_upper          = (::emCore::config::enable_os_region ? kOsMemBytes : 0U);
+
+// Compute a conservative minimum for protocol region based on config knobs only.
+inline constexpr std::size_t kProtoRingBytes      = ::emCore::config::protocol_ring_size;
+inline constexpr std::size_t kProtoPacketsBytes   = ::emCore::config::protocol_packet_size * 4U; // staging
+inline constexpr std::size_t kProtoHandlersBytes  = ::emCore::config::protocol_max_handlers * 64U; // dispatch tables
+inline constexpr std::size_t kProtoFixedOverhead  = 1024U; // parsers/encoders/pipeline bookkeeping
+inline constexpr std::size_t kProtocolMemBytesMin = kProtoRingBytes + kProtoPacketsBytes + kProtoHandlersBytes + kProtoFixedOverhead;
+
+inline constexpr std::size_t kProtocolMemBytesEffective = (kProtocolMemBytes > 0) ? kProtocolMemBytes : kProtocolMemBytesMin;
+static_assert(!::emCore::config::enable_protocol || (kProtocolMemBytesEffective >= kProtocolMemBytesMin),
+              "EMCORE_PROTOCOL_MEM_BYTES is below computed minimum; increase it or lower EMCORE_PROTOCOL_* knobs.");
+inline constexpr std::size_t protocol_total_upper    = (::emCore::config::enable_protocol ? kProtocolMemBytesEffective : 0U);
+
+inline constexpr std::size_t diagnostics_total_upper = (::emCore::config::enable_diagnostics ? kDiagnosticsMemBytes : 0U);
 
 // Sum all uppers
 inline constexpr std::size_t total_required_upper =

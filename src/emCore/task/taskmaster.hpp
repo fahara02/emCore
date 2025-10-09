@@ -19,6 +19,8 @@
 #endif
 #include "../messaging/qos_pubsub.hpp"
 #include "../messaging/distributed_state.hpp"
+#include "../memory/layout.hpp"
+#include "../runtime.hpp"
 #include "rtos_scheduler.hpp"
 #include "watchdog.hpp"
 
@@ -163,9 +165,32 @@ public:
     taskmaster(taskmaster&&) = delete;
     taskmaster& operator=(taskmaster&&) = delete;
     
+#if EMCORE_ENABLE_TASKS_REGION
+    static_assert(::emCore::memory::kLayout.tasks.size >= sizeof(taskmaster),
+                  "emCore tasks region too small for taskmaster. Define EMCORE_TASK_MEM_BYTES large enough or disable EMCORE_ENABLE_TASKS_REGION.");
+#endif
+
     static taskmaster& instance() noexcept {
+#if EMCORE_ENABLE_TASKS_REGION
+        if constexpr (emCore::memory::kLayout.tasks.size >= sizeof(taskmaster)) {
+            static bool constructed = false;
+            void* base = emCore::runtime::tasks_region();
+            auto* obj = static_cast<taskmaster*>(base);
+            if (!constructed) {
+                static_assert(alignof(taskmaster) <= 8, "taskmaster alignment must be <= arena alignment");
+                ::new (obj) taskmaster();
+                constructed = true;
+            }
+            return *obj;
+        } else {
+            // Fallback when region is disabled or too small
+            static taskmaster instance;
+            return instance;
+        }
+#else
         static taskmaster instance;
         return instance;
+#endif
     }
     
     result<void, error_code> initialize() noexcept {

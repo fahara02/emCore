@@ -23,6 +23,75 @@
 #define EMCORE_ENABLE_SMALL_BROKER 1
 #endif
 
+// Core caps defaults for no-YAML/no-flags builds
+#ifndef EMCORE_MAX_TASKS
+#define EMCORE_MAX_TASKS 8
+#endif
+#ifndef EMCORE_MAX_EVENTS
+#define EMCORE_MAX_EVENTS 16
+#endif
+
+// Global memory budget default for no-YAML/no-flags builds
+#ifndef EMCORE_MEMORY_BUDGET_BYTES
+#define EMCORE_MEMORY_BUDGET_BYTES 0
+#endif
+
+// Global feature toggles (moved from memory/budget.hpp)
+#ifndef EMCORE_ENABLE_MESSAGING
+#define EMCORE_ENABLE_MESSAGING 0
+#endif
+#ifndef EMCORE_ENABLE_EVENTS
+#define EMCORE_ENABLE_EVENTS 0
+#endif
+#ifndef EMCORE_ENABLE_TASKS_REGION
+#define EMCORE_ENABLE_TASKS_REGION 0
+#endif
+#ifndef EMCORE_ENABLE_OS_REGION
+#define EMCORE_ENABLE_OS_REGION 0
+#endif
+#ifndef EMCORE_ENABLE_PROTOCOL
+#define EMCORE_ENABLE_PROTOCOL 0
+#endif
+#ifndef EMCORE_ENABLE_DIAGNOSTICS
+#define EMCORE_ENABLE_DIAGNOSTICS 0
+#endif
+
+// Reserve sizes and bookkeeping (moved from memory/budget.hpp)
+#ifndef EMCORE_MSG_OVERHEAD_BYTES
+#define EMCORE_MSG_OVERHEAD_BYTES 2048
+#endif
+#ifndef EMCORE_TASK_MEM_BYTES
+#define EMCORE_TASK_MEM_BYTES 0
+#endif
+#ifndef EMCORE_TASK_PER_TCB_BYTES
+#define EMCORE_TASK_PER_TCB_BYTES 256
+#endif
+#ifndef EMCORE_TASK_FIXED_OVERHEAD_BYTES
+#define EMCORE_TASK_FIXED_OVERHEAD_BYTES 512
+#endif
+#ifndef EMCORE_TASK_MAILBOX_REF_BYTES
+#define EMCORE_TASK_MAILBOX_REF_BYTES 8
+#endif
+#ifndef EMCORE_OS_MEM_BYTES
+#define EMCORE_OS_MEM_BYTES 0
+#endif
+#ifndef EMCORE_PROTOCOL_MEM_BYTES
+#define EMCORE_PROTOCOL_MEM_BYTES 0
+#endif
+#ifndef EMCORE_DIAGNOSTICS_MEM_BYTES
+#define EMCORE_DIAGNOSTICS_MEM_BYTES 0
+#endif
+
+#ifndef EMCORE_PROTOCOL_PACKET_SIZE
+#define EMCORE_PROTOCOL_PACKET_SIZE 64
+#endif
+#ifndef EMCORE_PROTOCOL_MAX_HANDLERS
+#define EMCORE_PROTOCOL_MAX_HANDLERS 16
+#endif
+#ifndef EMCORE_PROTOCOL_RING_SIZE
+#define EMCORE_PROTOCOL_RING_SIZE 512
+#endif
+
 // If available, include generated messaging configuration macros produced from YAML.
 // This allows YAML to override the default capacities at compile time.
 // You can force-ignore this generated header by defining EMCORE_IGNORE_GENERATED_MESSAGING_CONFIG=1
@@ -52,11 +121,34 @@ namespace emCore::config {
         #else
         constexpr size_t default_mailbox_queue_capacity = 4; // tightened to reduce RAM
         #endif
+        
+        // Feature toggles as constexpr for compile-time branching
+        constexpr bool enable_messaging   = (EMCORE_ENABLE_MESSAGING != 0);
+        constexpr bool enable_events      = (EMCORE_ENABLE_EVENTS != 0);
+        constexpr bool enable_tasks_region= (EMCORE_ENABLE_TASKS_REGION != 0);
+        constexpr bool enable_os_region   = (EMCORE_ENABLE_OS_REGION != 0);
+        constexpr bool enable_protocol    = (EMCORE_ENABLE_PROTOCOL != 0);
+        constexpr bool enable_diagnostics = (EMCORE_ENABLE_DIAGNOSTICS != 0);
+
+        // Reserve sizes exposed as constexpr
+        constexpr size_t msg_overhead_bytes         = EMCORE_MSG_OVERHEAD_BYTES;
+        constexpr size_t task_mem_bytes             = EMCORE_TASK_MEM_BYTES;
+        constexpr size_t task_per_tcb_bytes         = EMCORE_TASK_PER_TCB_BYTES;
+        constexpr size_t task_fixed_overhead_bytes  = EMCORE_TASK_FIXED_OVERHEAD_BYTES;
+        constexpr size_t task_mailbox_ref_bytes     = EMCORE_TASK_MAILBOX_REF_BYTES;
+        constexpr size_t os_mem_bytes               = EMCORE_OS_MEM_BYTES;
+        constexpr size_t protocol_mem_bytes         = EMCORE_PROTOCOL_MEM_BYTES;
+        constexpr size_t diagnostics_mem_bytes      = EMCORE_DIAGNOSTICS_MEM_BYTES;
+
+        // Protocol minimal sizing knobs as constexpr
+        constexpr size_t protocol_packet_size   = EMCORE_PROTOCOL_PACKET_SIZE;
+        constexpr size_t protocol_max_handlers  = EMCORE_PROTOCOL_MAX_HANDLERS;
+        constexpr size_t protocol_ring_size     = EMCORE_PROTOCOL_RING_SIZE;
 
         #ifdef EMCORE_MSG_MAX_TOPICS
         constexpr size_t default_max_topics = EMCORE_MSG_MAX_TOPICS;
         #else
-        constexpr size_t default_max_topics = 12; // tightened to reduce RAM
+        constexpr size_t default_max_topics = 6; // reduced to align with tests
         #endif
 
         #ifdef EMCORE_MSG_MAX_SUBS_PER_TOPIC

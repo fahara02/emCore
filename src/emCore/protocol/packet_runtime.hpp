@@ -10,6 +10,9 @@
 #include <emCore/protocol/decoder.hpp>
 #include <emCore/protocol/encoder.hpp>
 #include <emCore/protocol/command_dispatcher.hpp>
+#if EMCORE_ENABLE_PROTOCOL
+#include <emCore/protocol/protocol_global.hpp>
+#endif
 
 // Include generated packet configuration if available
 #if __has_include(<generated_packet_config.hpp>)
@@ -44,35 +47,22 @@ using FieldEncoderT = emCore::protocol::field_encoder<16, gencfg::OPCODE_SPACE>;
 using RingT = emCore::protocol::byte_ring<EMCORE_PROTOCOL_RING_SIZE>;
 using PipelineT = emCore::protocol::packet_pipeline<RingT, ParserT, DispatcherT, PacketT>;
 
-inline RingT& get_ring() noexcept {
-    static RingT ring;
-    return ring;
-}
-
-inline ParserT& get_parser() noexcept {
-    static ParserT parser;
-    return parser;
-}
-
-inline DispatcherT& get_dispatcher() noexcept {
-    static DispatcherT dispatcher;
-    return dispatcher;
-}
-
-inline FieldDecoderT& get_field_decoder() noexcept {
-    static FieldDecoderT decoder;
-    return decoder;
-}
-
-inline FieldEncoderT& get_field_encoder() noexcept {
-    static FieldEncoderT encoder;
-    return encoder;
-}
-
-inline PipelineT& get_pipeline() noexcept {
-    static PipelineT pipeline(get_ring(), get_parser(), get_dispatcher());
-    return pipeline;
-}
+#if EMCORE_ENABLE_PROTOCOL
+inline RingT&           get_ring()          noexcept { return ::emCore::protocol::global::global_ring(); }
+inline ParserT&         get_parser()        noexcept { return ::emCore::protocol::global::global_parser(); }
+inline DispatcherT&     get_dispatcher()    noexcept { return ::emCore::protocol::global::global_dispatcher(); }
+inline FieldDecoderT&   get_field_decoder() noexcept { return ::emCore::protocol::global::global_field_decoder(); }
+inline FieldEncoderT&   get_field_encoder() noexcept { return ::emCore::protocol::global::global_field_encoder(); }
+inline PipelineT&       get_pipeline()      noexcept { return ::emCore::protocol::global::global_pipeline(); }
+#else
+// Fallback internal statics when protocol is disabled (no central region used)
+inline RingT&           get_ring()          noexcept { static RingT r; return r; }
+inline ParserT&         get_parser()        noexcept { static ParserT p; return p; }
+inline DispatcherT&     get_dispatcher()    noexcept { static DispatcherT d; return d; }
+inline FieldDecoderT&   get_field_decoder() noexcept { static FieldDecoderT fd; return fd; }
+inline FieldEncoderT&   get_field_encoder() noexcept { static FieldEncoderT fe; return fe; }
+inline PipelineT&       get_pipeline()      noexcept { static PipelineT pl(get_ring(), get_parser(), get_dispatcher()); return pl; }
+#endif
 
 // Convenience processing helpers
 inline size_t process_available(size_t max_packets = static_cast<size_t>(-1)) noexcept {
